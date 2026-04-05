@@ -1,0 +1,88 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+*.so
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Node.js
+node_modules/
+.npm/
+.next/
+out/
+dist/
+.turbo/
+
+# Environment files — NEVER commit secrets
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+!.env.local.example
+
+# Secrets
+*.pem
+*.key
+*.p8
+*_rsa
+*_dsa
+*_ed25519
+*_ecdsa
+
+# Docker
+.docker/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Temp files
+/tmp/
+*.tmp
+
+# Kubernetes
+kubeconfig
+*.kubeconfig
+
+# Stripe
+.stripe/
+
+# MinIO data (if running locally outside Docker)
+data/

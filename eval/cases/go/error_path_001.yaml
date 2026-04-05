@@ -1,0 +1,50 @@
+id: go-error-path-001
+language: go
+category: error_path_missing_span
+severity: critical
+description: >
+  HTTP handler calls a DB function; the error check does not call span.RecordError.
+  The trace will succeed even when the DB call fails — making errors invisible in APM.
+
+snippet: |
+  package payment
+
+  import (
+      "context"
+      "net/http"
+      "github.com/jackc/pgx/v5"
+  )
+
+  func ProcessPayment(ctx context.Context, amount float64) error {
+      _, err := db.ExecContext(ctx, "INSERT INTO payments (amount) VALUES ($1)", amount)
+      if err != nil {
+          return err
+      }
+      return nil
+  }
+
+  func PaymentHandler(w http.ResponseWriter, r *http.Request) {
+      err := ProcessPayment(r.Context(), 100.0)
+      if err != nil {
+          http.Error(w, "payment failed", http.StatusInternalServerError)
+          return
+      }
+      w.WriteHeader(http.StatusOK)
+  }
+
+expected_findings:
+  - category: error_path_missing_span
+    severity: critical
+    file_path: snippet
+    line_hint: 12  # if err != nil without RecordError
+  - category: handler_no_span
+    severity: critical
+    file_path: snippet
+    line_hint: 20  # PaymentHandler has no tracer.Start
+
+expected_no_findings:
+  - category: high_cardinality_label
+  - category: pii_in_logs
+
+annotated_by: eng-team
+version: 1

@@ -1,0 +1,32 @@
+id: python-negative-utility-001
+language: python
+category: negative_example
+severity: none
+description: >
+  NEGATIVE EXAMPLE: pure utility/helper functions with no I/O should NOT be reported.
+  String formatters, validators, and math helpers are not observability targets.
+
+snippet: |
+  import re
+  from decimal import Decimal
+
+  def format_currency(amount: Decimal, currency: str = "BRL") -> str:
+      return f"{currency} {amount:.2f}"
+
+  def validate_email(email: str) -> bool:
+      pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+      return bool(re.match(pattern, email))
+
+  def calculate_tax(amount: Decimal, rate: Decimal) -> Decimal:
+      return (amount * rate).quantize(Decimal("0.01"))
+
+expected_findings: []
+
+expected_no_findings:
+  - category: handler_no_span
+    note: "Pure utility functions must NOT be flagged for missing spans"
+  - category: error_path_missing_span
+    note: "No error paths present — nothing to report"
+
+annotated_by: eng-team
+version: 1

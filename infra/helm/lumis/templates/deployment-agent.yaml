@@ -1,0 +1,97 @@
+{{- if .Values.agent.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lumis.fullname" . }}-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lumis.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  replicas: {{ .Values.agent.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "lumis.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: agent
+  template:
+    metadata:
+      labels:
+        {{- include "lumis.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: agent
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.migrations.useInitContainer }}
+      initContainers:
+        - name: wait-api-ready
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - until wget -q -O- http://{{ include "lumis.fullname" . }}-api:{{ .Values.api.service.port }}/ready > /dev/null; do sleep 2; done
+        {{- if .Values.redis.bundled.enabled }}
+        - name: wait-redis
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - until nc -z {{ include "lumis.redisHost" . }} 6379; do sleep 2; done
+        {{- end }}
+        {{- if .Values.postgresql.bundled.enabled }}
+        - name: wait-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - until nc -z {{ include "lumis.postgresqlHost" . }} 5432; do sleep 2; done
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: agent
+          image: {{ include "lumis.image" (dict "root" . "repository" .Values.agent.image.repository "tag" .Values.agent.image.tag) }}
+          imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.agent.service.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "lumis.fullname" . }}-config
+            - secretRef:
+                name: {{ include "lumis.secretName" . }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.agent.service.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.agent.service.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.agent.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lumis.fullname" . }}-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lumis.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  selector:
+    {{- include "lumis.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+  ports:
+    - port: {{ .Values.agent.service.port }}
+      targetPort: {{ .Values.agent.service.port }}
+      {{- if and (eq .Values.agent.service.type "NodePort") .Values.agent.service.nodePort }}
+      nodePort: {{ .Values.agent.service.nodePort }}
+      {{- end }}
+  type: {{ .Values.agent.service.type }}
+{{- end }}

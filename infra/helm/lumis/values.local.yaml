@@ -1,0 +1,35 @@
+# Local Kubernetes (kind/minikube) overrides
+
+ingress:
+  enabled: false  # Use NodePort in local k8s
+
+api:
+  service:
+    type: NodePort
+    nodePort: 30800
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+
+agent:
+  replicaCount: 1
+
+worker:
+  replicaCount: 1
+  keda:
+    enabled: false
+
+web:
+  service:
+    type: NodePort
+    nodePort: 30300
+  replicaCount: 1
+
+config:
+  env: local
+  debug: "true"
+  logLevel: debug
+  nextPublicApiUrl: "http://localhost:30800"
+  apiBaseUrl: "http://localhost:30800"
+  frontendUrl: "http://localhost:30300"
+  allowedOrigins: '["http://localhost:30300","http://localhost:3000","http://127.0.0.1:30300"]'

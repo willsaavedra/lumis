@@ -1,0 +1,41 @@
+id: js-promise-catch-001
+language: javascript
+category: error_path_missing_span
+severity: critical
+description: >
+  Express route handler chains .catch() without recording the exception on the active span.
+  Errors in the async chain will be returned to the client but remain invisible in traces.
+
+snippet: |
+  const express = require('express');
+  const router = express.Router();
+
+  router.post('/orders', async (req, res) => {
+    createOrder(req.body)
+      .then(order => res.json({ id: order.id }))
+      .catch(err => {
+        console.error('order creation failed:', err.message);
+        res.status(500).json({ error: 'internal error' });
+      });
+  });
+
+  async function createOrder(data) {
+    const result = await db.query('INSERT INTO orders ...', [data.amount]);
+    return result.rows[0];
+  }
+
+expected_findings:
+  - category: error_path_missing_span
+    severity: critical
+    file_path: snippet
+    line_hint: 7  # .catch without span.recordException
+  - category: unstructured_log
+    severity: warning
+    file_path: snippet
+    line_hint: 8  # console.error string interpolation
+
+expected_no_findings:
+  - category: high_cardinality_label
+
+annotated_by: eng-team
+version: 1

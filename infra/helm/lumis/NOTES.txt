@@ -1,0 +1,30 @@
+Lumis foi instalado no namespace {{ .Release.Namespace }}.
+
+{{- if .Values.ingress.enabled }}
+
+Ingress:
+  Web:  https://{{ .Values.ingress.hosts.web }}
+  API:  https://{{ .Values.ingress.hosts.api }}
+{{- else }}
+
+Serviços (ClusterIP / NodePort):
+  API:   {{ include "lumis.fullname" . }}-api:{{ .Values.api.service.port }}
+  Web:   {{ include "lumis.fullname" . }}-web:{{ .Values.web.service.port }}
+{{- if .Values.agent.enabled }}
+  Agent: {{ include "lumis.fullname" . }}-agent:{{ .Values.agent.service.port }}
+{{- end }}
+{{- if .Values.flower.enabled }}
+  Flower: {{ include "lumis.fullname" . }}-flower:{{ .Values.flower.service.port }}
+{{- end }}
+{{- end }}
+
+Secret de aplicação: {{ include "lumis.secretName" . }}
+ConfigMap: {{ include "lumis.fullname" . }}-config
+
+{{- if and .Values.postgresql.bundled.enabled .Values.redis.bundled.enabled .Values.minio.bundled.enabled }}
+
+Datastores empacotados no chart: PostgreSQL (pgvector), Redis, MinIO.
+{{- else }}
+
+Configure secrets.databaseUrl / redisUrl / celery* / S3 e config.s3EndpointUrl quando usar RDS, ElastiCache ou S3 gerenciado.
+{{- end }}

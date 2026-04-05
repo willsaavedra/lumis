@@ -1,0 +1,60 @@
+{{- if .Values.flower.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lumis.fullname" . }}-flower
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lumis.labels" . | nindent 4 }}
+    app.kubernetes.io/component: flower
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "lumis.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: flower
+  template:
+    metadata:
+      labels:
+        {{- include "lumis.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: flower
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: flower
+          image: {{ include "lumis.image" (dict "root" . "repository" .Values.flower.image.repository "tag" .Values.flower.image.tag) }}
+          imagePullPolicy: {{ .Values.flower.image.pullPolicy }}
+          env:
+            - name: CELERY_BROKER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lumis.secretName" . }}
+                  key: CELERY_BROKER_URL
+            - name: FLOWER_PORT
+              value: {{ .Values.flower.service.port | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.flower.service.port }}
+          resources:
+            {{- toYaml .Values.flower.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lumis.fullname" . }}-flower
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lumis.labels" . | nindent 4 }}
+    app.kubernetes.io/component: flower
+spec:
+  selector:
+    {{- include "lumis.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: flower
+  ports:
+    - port: {{ .Values.flower.service.port }}
+      targetPort: {{ .Values.flower.service.port }}
+  type: {{ .Values.flower.service.type }}
+{{- end }}

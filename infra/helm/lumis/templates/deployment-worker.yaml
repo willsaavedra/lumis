@@ -1,0 +1,63 @@
+{{- if .Values.worker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lumis.fullname" . }}-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lumis.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "lumis.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "lumis.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $migrate := include "lumis.initContainers.dbMigrate" . | trim }}
+      {{- if $migrate }}
+      initContainers:
+{{ include "lumis.initContainers.dbMigrate" . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          image: {{ include "lumis.image" (dict "root" . "repository" .Values.worker.image.repository "tag" .Values.worker.image.tag) }}
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          command: ["celery", "-A", "apps.worker.celery_app", "worker", "--loglevel=info", "--concurrency=2"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "lumis.fullname" . }}-config
+            - secretRef:
+                name: {{ include "lumis.secretName" . }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+{{- if .Values.worker.keda.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "lumis.fullname" . }}-worker
+  namespace: {{ .Release.Namespace }}
+spec:
+  scaleTargetRef:
+    name: {{ include "lumis.fullname" . }}-worker
+  minReplicaCount: {{ .Values.worker.keda.minReplicaCount }}
+  maxReplicaCount: {{ .Values.worker.keda.maxReplicaCount }}
+  cooldownPeriod: 60
+  triggers:
+    - type: redis
+      metadata:
+        address: {{ default (printf "%s:6379" (include "lumis.redisHost" .)) .Values.worker.keda.redisAddress | quote }}
+        listName: {{ .Values.worker.keda.listName | quote }}
+        listLength: "5"
+{{- end }}
+{{- end }}

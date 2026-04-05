@@ -1,0 +1,45 @@
+id: iac-terraform-sqs-no-alarm-001
+language: terraform
+category: iac_missing_alarm
+severity: critical
+description: >
+  SQS queue is defined without any CloudWatch metric alarm.
+  Queue depth buildup and DLQ messages will go undetected until they cause downstream failures.
+
+snippet: |
+  resource "aws_sqs_queue" "payment_queue" {
+    name                      = "payment-queue"
+    message_retention_seconds = 86400
+    visibility_timeout_seconds = 30
+
+    tags = {
+      env     = "production"
+      service = "payment"
+      team    = "platform"
+    }
+  }
+
+  resource "aws_lambda_function" "payment_processor" {
+    function_name = "payment-processor"
+    runtime       = "python3.11"
+    handler       = "handler.main"
+    filename      = "function.zip"
+    role          = aws_iam_role.lambda_exec.arn
+  }
+
+expected_findings:
+  - category: iac_missing_alarm
+    severity: critical
+    file_path: snippet
+    note: "SQS queue without CloudWatch alarm"
+  - category: iac_lambda_no_layer
+    severity: critical
+    file_path: snippet
+    note: "Lambda without observability layer"
+
+expected_no_findings:
+  - category: iac_missing_tags
+    note: "Tags are present (env, service, team)"
+
+annotated_by: eng-team
+version: 1

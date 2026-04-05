@@ -1,0 +1,43 @@
+{{- if .Values.beat.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lumis.fullname" . }}-beat
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lumis.labels" . | nindent 4 }}
+    app.kubernetes.io/component: beat
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "lumis.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: beat
+  template:
+    metadata:
+      labels:
+        {{- include "lumis.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: beat
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $migrate := include "lumis.initContainers.dbMigrate" . | trim }}
+      {{- if $migrate }}
+      initContainers:
+{{ include "lumis.initContainers.dbMigrate" . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: beat
+          image: {{ include "lumis.image" (dict "root" . "repository" .Values.beat.image.repository "tag" .Values.beat.image.tag) }}
+          imagePullPolicy: {{ .Values.beat.image.pullPolicy }}
+          command: ["celery", "-A", "apps.worker.celery_app", "beat", "--loglevel=info"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "lumis.fullname" . }}-config
+            - secretRef:
+                name: {{ include "lumis.secretName" . }}
+          resources:
+            {{- toYaml .Values.beat.resources | nindent 12 }}
+{{- end }}

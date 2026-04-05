@@ -1,0 +1,39 @@
+id: python-bare-except-001
+language: python
+category: error_path_missing_span
+severity: critical
+description: >
+  FastAPI endpoint uses a bare except block without calling span.record_exception().
+  Exceptions are swallowed silently — no trace error, no log with exc_info.
+
+snippet: |
+  from fastapi import APIRouter
+  import structlog
+
+  router = APIRouter()
+  log = structlog.get_logger()
+
+  @router.post("/charge")
+  async def charge_customer(request: ChargeRequest):
+      try:
+          result = await payment_service.charge(request.amount, request.customer_id)
+          return {"status": "ok", "charge_id": result.id}
+      except:
+          log.info("charge_failed")
+          return {"status": "error"}
+
+expected_findings:
+  - category: error_path_missing_span
+    severity: critical
+    file_path: snippet
+    line_hint: 12  # bare except without record_exception
+  - category: handler_no_span
+    severity: critical
+    file_path: snippet
+    line_hint: 8   # endpoint has no tracer span
+
+expected_no_findings:
+  - category: pii_in_logs
+
+annotated_by: eng-team
+version: 1

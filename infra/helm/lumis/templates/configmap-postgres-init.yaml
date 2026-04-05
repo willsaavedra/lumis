@@ -1,0 +1,13 @@
+{{- if .Values.postgresql.bundled.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lumis.fullname" . }}-postgres-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lumis.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres-init
+data:
+  init.sql: |
+{{ .Files.Get "files/init.sql" | nindent 4 }}
+{{- end }}

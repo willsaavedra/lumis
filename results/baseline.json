@@ -1,0 +1,1 @@
+{"timestamp": "2026-04-02T00:00:00Z", "metrics": {"tp": 0, "fp": 0, "fn": 0, "tn": 0, "precision": 0.0, "recall": 0.0, "fpr": 0.0, "f1": 0.0}, "note": "Initial baseline — run eval.py and replace this file with real results."}

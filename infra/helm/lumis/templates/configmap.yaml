@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lumis.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lumis.labels" . | nindent 4 }}
+data:
+  ENV: {{ .Values.config.env | quote }}
+  DEBUG: {{ .Values.config.debug | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  S3_REGION: {{ .Values.config.s3Region | quote }}
+  S3_BUCKET_NAME: {{ .Values.config.s3BucketName | quote }}
+  S3_ENDPOINT_URL: {{ include "lumis.s3EndpointUrl" . | quote }}
+  DD_SITE: {{ .Values.config.ddSite | quote }}
+  NEXT_PUBLIC_API_URL: {{ .Values.config.nextPublicApiUrl | quote }}
+  API_BASE_URL: {{ include "lumis.apiBaseUrl" . | quote }}
+  FRONTEND_URL: {{ include "lumis.frontendUrl" . | quote }}
+  ALLOWED_ORIGINS: {{ .Values.config.allowedOrigins | quote }}
+  ANTHROPIC_MODEL_PRIMARY: {{ .Values.config.anthropicModelPrimary | quote }}
+  ANTHROPIC_MODEL_TRIAGE: {{ .Values.config.anthropicModelTriage | quote }}
+  OPENAI_EMBEDDING_MODEL: {{ .Values.config.openaiEmbeddingModel | quote }}
+  {{- if .Values.config.openaiBaseUrl }}
+  OPENAI_BASE_URL: {{ .Values.config.openaiBaseUrl | quote }}
+  {{- end }}

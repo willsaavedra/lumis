@@ -1,0 +1,44 @@
+# AWS EKS staging overrides
+
+secrets:
+  create: false
+
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:us-east-1:ACCOUNT:certificate/CERT_ID"
+  hosts:
+    web: app.staging.lumis.dev
+    api: api.staging.lumis.dev
+
+api:
+  replicaCount: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+
+worker:
+  replicaCount: 1
+  keda:
+    enabled: true
+    minReplicaCount: 1
+    maxReplicaCount: 10
+
+config:
+  env: staging
+  debug: "false"
+  s3BucketName: lumis-staging
+  nextPublicApiUrl: "https://api.staging.lumis.dev"
+
+externalSecrets:
+  enabled: true
+  secretStore: aws-secrets-manager
+  secrets:
+    - name: lumis-secrets
+      remoteRef:
+        key: lumis/staging/secrets

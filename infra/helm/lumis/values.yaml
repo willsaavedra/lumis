@@ -1,0 +1,253 @@
+# Default values for lumis Helm chart — mirrors docker-compose services (web, api, agent, worker, beat, flower, postgres, redis, minio).
+
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+
+nameOverride: ""
+fullnameOverride: ""
+
+# ── Secrets ─────────────────────────────────────────────────────────────────
+# When create=true, a Secret is rendered with connection strings and app keys.
+# For production, prefer existingSecret + External Secrets Operator (externalSecrets).
+secrets:
+  create: true
+  # If set, Deployments use this Secret and none is created from values.
+  existingSecret: ""
+  secretKey: "dev-local-only-change-me-32chars!!"
+  apiKeySalt: "dev-local-only-salt-32chars-min-32!!"
+  anthropicApiKey: ""
+  # RAG embeddings (OpenAI API); required for ingest_global_docs and retrieve_context
+  openaiApiKey: ""
+  # Non-empty values override auto-generated URLs when bundled datastores are used.
+  databaseUrl: ""
+  redisUrl: ""
+  celeryBrokerUrl: ""
+  celeryResultBackend: ""
+  s3AccessKeyId: ""
+  s3SecretAccessKey: ""
+
+# ── Bundled datastores (disable when using RDS / ElastiCache / S3) ───────────
+postgresql:
+  bundled:
+    enabled: true
+  image:
+    repository: pgvector/pgvector
+    tag: pg16
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: true
+    size: 10Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  auth:
+    username: sre
+    password: local_only
+    database: lumis
+
+redis:
+  bundled:
+    enabled: true
+  image:
+    repository: redis
+    tag: "7-alpine"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+minio:
+  bundled:
+    enabled: true
+  image:
+    repository: minio/minio
+    tag: latest
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: true
+    size: 20Gi
+  rootUser: minioadmin
+  rootPassword: minioadmin
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# ── API ──────────────────────────────────────────────────────────────────────
+api:
+  enabled: true
+  image:
+    repository: lumis-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+# ── Agent (uvicorn apps.agent.server) ───────────────────────────────────────
+agent:
+  enabled: true
+  image:
+    repository: lumis-agent
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8001
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+# ── Worker (Celery) ───────────────────────────────────────────────────────────
+worker:
+  enabled: true
+  image:
+    repository: lumis-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 1Gi
+  keda:
+    enabled: false
+    minReplicaCount: 1
+    maxReplicaCount: 20
+    redisAddress: ""
+    listName: celery
+
+# ── Celery Beat (scheduler — required for crontab tasks in celery_app) ────────
+beat:
+  enabled: true
+  image:
+    repository: lumis-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── Flower (Celery monitoring UI; same image pattern as docker-compose.override) ──
+flower:
+  enabled: false
+  image:
+    repository: mher/flower
+    tag: "2.0"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 5555
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── Web (Next.js) ───────────────────────────────────────────────────────────
+web:
+  enabled: true
+  image:
+    repository: lumis-web
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  service:
+    type: ClusterIP
+    port: 3000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── DB migrations (alembic via initContainers on api/worker/beat; agent waits for API) ──
+migrations:
+  useInitContainer: true
+
+# ── Ingress ───────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    web: app.lumis.dev
+    api: api.lumis.dev
+  tls:
+    enabled: true
+    secretName: lumis-tls
+
+# ── Non-sensitive config (ConfigMap) ─────────────────────────────────────────
+config:
+  env: production
+  debug: "false"
+  logLevel: info
+  s3Region: us-east-1
+  s3BucketName: lumis-prod
+  # When minio.bundled is false, set this (e.g. https://s3.amazonaws.com or custom endpoint).
+  s3EndpointUrl: ""
+  ddSite: datadoghq.com
+  nextPublicApiUrl: "https://api.lumis.dev"
+  apiBaseUrl: ""
+  frontendUrl: ""
+  anthropicModelPrimary: "claude-sonnet-4-20250514"
+  anthropicModelTriage: "claude-haiku-4-5-20251001"
+  openaiEmbeddingModel: "text-embedding-3-small"
+  # Optional OpenAI-compatible API base (Azure, etc.)
+  openaiBaseUrl: ""
+  # JSON array for pydantic list field
+  allowedOrigins: '["https://app.lumis.dev"]'
+
+# ── External Secrets Operator (optional) ────────────────────────────────────
+externalSecrets:
+  enabled: false
+  secretStore: aws-secrets-manager
+  # When set, ExternalSecret writes to this name (default: lumis-secrets).
+  targetSecretName: ""
+  secrets:
+    - name: lumis-secrets
+      remoteRef:
+        key: lumis/production/secrets

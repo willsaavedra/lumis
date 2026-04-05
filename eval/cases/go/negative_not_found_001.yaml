@@ -1,0 +1,37 @@
+id: go-negative-not-found-001
+language: go
+category: negative_example
+severity: none
+description: >
+  NEGATIVE EXAMPLE: errors.Is(err, ErrNotFound) is intentional not-found handling.
+  This should NOT be reported as a missing RecordError — it is a business-level 404.
+
+snippet: |
+  package repository
+
+  import (
+      "context"
+      "errors"
+  )
+
+  var ErrNotFound = errors.New("not found")
+
+  func (r *Repo) GetUser(ctx context.Context, id string) (*User, error) {
+      user, err := r.db.FindByID(ctx, id)
+      if errors.Is(err, ErrNotFound) {
+          return nil, ErrNotFound
+      }
+      if err != nil {
+          return nil, err
+      }
+      return user, nil
+  }
+
+expected_findings: []
+
+expected_no_findings:
+  - category: error_path_missing_span
+    note: "errors.Is(err, ErrNotFound) is intentional — must NOT be flagged"
+
+annotated_by: eng-team
+version: 1

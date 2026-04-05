@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lumis-config
+  namespace: lumis
+data:
+  ENV: "staging"
+  DEBUG: "false"
+  LOG_LEVEL: "info"
+  S3_REGION: "us-east-1"
+  S3_BUCKET_NAME: "lumis-staging"
+  DD_SITE: "datadoghq.com"
+  NEXT_PUBLIC_API_URL: "https://api.lumis.staging.example.com"
+  ANTHROPIC_MODEL_PRIMARY: "claude-sonnet-4-20250514"
+  ANTHROPIC_MODEL_TRIAGE: "claude-haiku-4-5-20251001"
