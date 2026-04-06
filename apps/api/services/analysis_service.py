@@ -121,6 +121,7 @@ async def enqueue_manual_analysis(
     analysis_type: str,
     *,
     changed_files: list[str] | None = None,
+    llm_provider: str = "anthropic",
 ) -> AnalysisJob:
     """Enqueue a manual analysis triggered via API."""
     repo_result = await session.execute(
@@ -162,6 +163,7 @@ async def enqueue_manual_analysis(
         trigger="manual",
         branch_ref=ref,
         analysis_type=analysis_type,
+        llm_provider=llm_provider,
         credits_reserved=ANALYSIS_COSTS.get(analysis_type, 3),
         changed_files=files_payload,
         billing_reservation=billing_snapshot,

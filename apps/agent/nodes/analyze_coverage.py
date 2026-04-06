@@ -468,9 +468,18 @@ async def analyze_coverage_node(state: AgentState) -> dict:
       - full:       capped breadth, primary model, heuristics from call graph
       - repository: large prioritized file set, batched, primary model, heuristics
     """
+    import time as _time
+    _t0 = _time.monotonic()
     analysis_type = state.get("request", {}).get("analysis_type", "full")
     cfg = _COVERAGE_CONFIG.get(analysis_type, _COVERAGE_CONFIG["full"])
 
+    log.info(
+        "node_started",
+        node="analyze_coverage",
+        analysis_type=analysis_type,
+        llm_provider=state.get("request", {}).get("llm_provider", "anthropic"),
+        relevant_files=len([f for f in state.get("changed_files", []) if f.get("relevance_score", 0) >= 1]),
+    )
     await publish_progress(state, "analyzing", 50, "Analyzing observability coverage...")
 
     call_graph = state.get("call_graph") or {}
@@ -655,7 +664,17 @@ async def analyze_coverage_node(state: AgentState) -> dict:
         else:
             batches = [capped]
 
-        for batch in batches:
+        for batch_idx, batch in enumerate(batches):
+            batch_files = [f["path"] for f in batch]
+            log.info(
+                "llm_batch_started",
+                node="analyze_coverage",
+                batch_idx=batch_idx,
+                batch_total=len(batches),
+                files=batch_files,
+                files_count=len(batch),
+                use_primary_model=cfg["use_primary_model"],
+            )
             try:
                 llm_findings = await _llm_analyze_coverage(
                     batch,
@@ -665,12 +684,54 @@ async def analyze_coverage_node(state: AgentState) -> dict:
                     coverage_map=coverage_map,
                     file_obs_imports=file_obs_imports,
                 )
+                kept = 0
+                suppressed = 0
                 for f in llm_findings:
                     if f.get("confidence", "medium") != "low":
                         findings.append(f)
+                        kept += 1
+                        log.info(
+                            "finding_emitted",
+                            node="analyze_coverage",
+                            batch_idx=batch_idx,
+                            pillar=f.get("pillar"),
+                            severity=f.get("severity"),
+                            confidence=f.get("confidence"),
+                            dimension=f.get("dimension"),
+                            file_path=f.get("file_path"),
+                            line_start=f.get("line_start"),
+                            title=f.get("title"),
+                            reasoning=f.get("reasoning"),
+                        )
+                    else:
+                        suppressed += 1
+                        log.info(
+                            "finding_suppressed",
+                            node="analyze_coverage",
+                            batch_idx=batch_idx,
+                            reason="low_confidence",
+                            pillar=f.get("pillar"),
+                            file_path=f.get("file_path"),
+                            title=f.get("title"),
+                            reasoning=f.get("reasoning"),
+                        )
+                log.info(
+                    "llm_batch_completed",
+                    node="analyze_coverage",
+                    batch_idx=batch_idx,
+                    findings_raw=len(llm_findings),
+                    findings_kept=kept,
+                    findings_suppressed_low_confidence=suppressed,
+                )
             except Exception as e:
-                log.warning("llm_coverage_analysis_failed", error=str(e), batch_size=len(batch))
+                log.warning("llm_coverage_analysis_failed", error=str(e), batch_size=len(batch), batch_idx=batch_idx)
 
+    log.info(
+        "node_completed",
+        node="analyze_coverage",
+        findings_count=len(findings),
+        duration_ms=round((_time.monotonic() - _t0) * 1000),
+    )
     await publish_progress(state, "analyzing", 60, f"Found {len(findings)} initial findings.")
     return {"findings": findings, "coverage_map": coverage_map}
 
@@ -694,14 +755,17 @@ async def _llm_analyze_coverage(
       - Coverage map JSON passed as structured input (Phase 2)
       - Calls log_llm_call for quality tracking
 
-    use_primary_model=True  → settings.anthropic_model_primary (Sonnet)
-    use_primary_model=False → settings.anthropic_model_triage  (Haiku)
+    use_primary_model=True  → settings.*_model_primary (Sonnet or CerebraAI primary)
+    use_primary_model=False → settings.*_model_triage  (Haiku or CerebraAI triage)
     """
-    from anthropic import Anthropic
     from apps.agent.core.config import settings
+    from apps.agent.llm.chat_completion import chat_complete
 
-    client = Anthropic(api_key=settings.anthropic_api_key)
-    model = settings.anthropic_model_primary if use_primary_model else settings.anthropic_model_triage
+    provider = state.get("request", {}).get("llm_provider", "anthropic")
+    if provider == "cerebra_ai":
+        model = settings.cerebra_ai_model_primary if use_primary_model else settings.cerebra_ai_model_triage
+    else:
+        model = settings.anthropic_model_primary if use_primary_model else settings.anthropic_model_triage
 
     # Build file summaries
     detected_langs: set[str] = set()
@@ -869,6 +933,7 @@ Return a JSON array of findings. Each finding MUST include ALL fields:
   "severity": "critical|warning|info",
   "dimension": "cost|snr|pipeline|compliance|coverage",
   "confidence": "high|medium|low",
+  "reasoning": "Q1: <yes/no — why>. Q2: <yes/no — why>. Q3: <yes/no — why>. Q4: <yes/no — why>.",
   "title": "Short, specific title (< 60 chars)",
   "description": "What is missing and why it matters in production",
   "file_path": "path/to/file.ext",
@@ -879,6 +944,12 @@ Return a JSON array of findings. Each finding MUST include ALL fields:
   "code_before": "Exact problematic code extracted from the file (2-8 lines showing the actual issue)",
   "code_after": "Corrected version of the same code snippet — syntactically valid and production-ready"
 }}]
+
+The `reasoning` field must answer all four Q1-Q4 questions that justified this finding:
+  Q1: Does this path handle money, user data, or a critical SLA operation?
+  Q2: Could trace context be silently dropped here (async boundary, thread pool, goroutine)?
+  Q3: Is this an error path with no span, no structured log, and no metric?
+  Q4: Is there high-cardinality noise or duplicate instrumentation? (must be "no" to report)
 
 CRITICAL for code_before / code_after:
 - Extract the REAL lines from the file content shown above — do NOT invent placeholder code
@@ -891,17 +962,23 @@ CRITICAL for code_before / code_after:
 Return ONLY the JSON array — no markdown fences, no explanations."""
 
     t0 = time.monotonic()
-    message = client.messages.create(
+    llm_resp = await chat_complete(
+        system=system_prompt,
+        user=user_content,
         model=model,
         max_tokens=2500,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_content}],
+        provider=provider,
+        base_url=settings.cerebra_ai_base_url,
+        api_key=settings.anthropic_api_key if provider == "anthropic" else settings.cerebra_ai_api_key,
+        temperature=settings.cerebra_ai_temperature if provider == "cerebra_ai" else 0.3,
+        top_p=settings.cerebra_ai_top_p if provider == "cerebra_ai" else 1.0,
+        timeout=settings.cerebra_ai_timeout if provider == "cerebra_ai" else 120,
     )
     latency_ms = (time.monotonic() - t0) * 1000
 
     findings: list[dict] = []
     try:
-        raw = message.content[0].text.strip()
+        raw = llm_resp.text.strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
@@ -914,8 +991,8 @@ Return ONLY the JSON array — no markdown fences, no explanations."""
         state=state,
         node="analyze_coverage",
         model=model,
-        input_tokens=message.usage.input_tokens,
-        output_tokens=message.usage.output_tokens,
+        input_tokens=llm_resp.input_tokens,
+        output_tokens=llm_resp.output_tokens,
         latency_ms=latency_ms,
         findings_count=len(findings),
         prompt_version=PROMPT_VERSION,

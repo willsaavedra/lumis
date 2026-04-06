@@ -18,23 +18,74 @@ def run_analysis(self, job_id: str, reservation_token: str) -> dict:
     Main analysis task. Calls the LangGraph agent asynchronously.
     All async work runs in a single event loop to avoid Redis loop conflicts.
     """
+    import time as _time
+    import structlog as _structlog
+    _structlog.contextvars.clear_contextvars()
+    _structlog.contextvars.bind_contextvars(job_id=job_id, task="run_analysis")
     log.info("analysis_task_started", job_id=job_id)
+    _task_start = _time.monotonic()
 
     async def _run():
+        import uuid as _uuid
+        import httpx
+        from apps.api.core.database import AsyncSessionFactory
+        from apps.api.core.config import settings
+        from apps.api.models.analysis import AnalysisJob, AnalysisResult, Finding as FindingModel
+        from apps.api.models.scm import Repository, ScmConnection
+        from sqlalchemy import select
+
+        # Load job + repo to build payload for TS agent
+        async with AsyncSessionFactory() as _s:
+            _job = (await _s.execute(select(AnalysisJob).where(AnalysisJob.id == _uuid.UUID(job_id)))).scalar_one_or_none()
+            if not _job:
+                raise ValueError(f"Job {job_id} not found")
+            _repo = (await _s.execute(select(Repository).where(Repository.id == _job.repo_id))).scalar_one_or_none()
+            _conn = None
+            if _repo and _repo.scm_connection_id:
+                _conn = (await _s.execute(select(ScmConnection).where(ScmConnection.id == _repo.scm_connection_id))).scalar_one_or_none()
+
+        _structlog.contextvars.bind_contextvars(
+            tenant_id=str(_job.tenant_id),
+            analysis_type=_job.analysis_type,
+            llm_provider=getattr(_job, "llm_provider", "anthropic"),
+            repo_id=str(_job.repo_id),
+        )
+
         try:
             await _update_job_status(job_id, "running")
 
-            from apps.agent.graph import run_analysis_graph
-            await run_analysis_graph(job_id)
+            payload = await _build_analysis_payload(_job, _repo, _conn, settings)
+
+            async with httpx.AsyncClient(timeout=httpx.Timeout(600.0)) as client:
+                resp = await client.post(f"{settings.ts_agent_url}/analyze", json=payload)
+                resp.raise_for_status()
+                result = resp.json()
+
+            await _persist_analysis_result(job_id, str(_job.tenant_id), result)
 
             await _update_job_status(job_id, "completed")
             await _consume_credits(job_id, reservation_token)
 
-            log.info("analysis_task_completed", job_id=job_id)
+            findings_count = len(result.get("findings", []))
+            score_global = result.get("scores", {}).get("global")
+
+            log.info(
+                "analysis_task_completed",
+                job_id=job_id,
+                findings_count=findings_count,
+                score_global=score_global,
+                duration_ms=round((_time.monotonic() - _task_start) * 1000),
+            )
             return {"status": "completed", "job_id": job_id}
 
         except Exception as e:
-            log.error("analysis_task_failed", job_id=job_id, error=str(e))
+            log.error(
+                "analysis_task_failed",
+                job_id=job_id,
+                error=str(e),
+                error_type=type(e).__name__,
+                duration_ms=round((_time.monotonic() - _task_start) * 1000),
+            )
             await _publish_analysis_failed_redis(job_id, str(e))
             await _update_job_status(job_id, "failed", str(e))
             await _release_credits(reservation_token, job_id)
@@ -46,16 +97,39 @@ def run_analysis(self, job_id: str, reservation_token: str) -> dict:
 @celery_app.task(bind=True, name="apps.worker.tasks.create_fix_pr", max_retries=1)
 def create_fix_pr(self, job_id: str) -> dict:
     """Generate code fixes with Claude and open a GitHub PR."""
+    import time as _time
+    import structlog as _structlog
+    _structlog.contextvars.clear_contextvars()
+    _structlog.contextvars.bind_contextvars(job_id=job_id, task="create_fix_pr")
     log.info("fix_pr_task_started", job_id=job_id)
+    _task_start = _time.monotonic()
 
     async def _run():
+        import uuid as _uuid
+        from apps.api.core.database import AsyncSessionFactory
+        from apps.api.models.analysis import AnalysisJob
+        from sqlalchemy import select
+
+        # Bind llm_provider from the job record
+        try:
+            async with AsyncSessionFactory() as _s:
+                _job = (await _s.execute(select(AnalysisJob).where(AnalysisJob.id == _uuid.UUID(job_id)))).scalar_one_or_none()
+            if _job:
+                _structlog.contextvars.bind_contextvars(
+                    llm_provider=getattr(_job, "llm_provider", "anthropic"),
+                    tenant_id=str(_job.tenant_id),
+                )
+        except Exception:
+            pass
+
         from apps.api.services.fix_pr_service import create_fix_pr as _create_fix_pr
         try:
             pr_url = await _create_fix_pr(job_id)
             await _save_pr_url(job_id, pr_url)
+            log.info("fix_pr_task_completed", job_id=job_id, pr_url=pr_url, duration_ms=round((_time.monotonic() - _task_start) * 1000))
             return {"status": "created", "pr_url": pr_url}
         except Exception:
-            log.exception("fix_pr_task_failed", job_id=job_id)
+            log.exception("fix_pr_task_failed", job_id=job_id, duration_ms=round((_time.monotonic() - _task_start) * 1000))
             await _clear_fix_pr_enqueue(job_id)
             raise
 
@@ -178,6 +252,162 @@ async def _fetch_repo_context(
                 continue
 
     return "\n\n".join(parts)
+
+
+async def _build_analysis_payload(job, repo, conn, settings) -> dict:
+    """Build the AnalysisRequest payload for the TS agent from DB records."""
+    installation_id = conn.installation_id if conn else None
+    scm_type = (conn.scm_type if conn else "github") or "github"
+
+    full_name = repo.full_name if repo else ""
+    clone_url = ""
+    if repo:
+        clone_url = repo.clone_url or ""
+        if not clone_url:
+            if scm_type == "gitlab":
+                base = settings.gitlab_base_url.rstrip("/")
+                clone_url = f"{base}/{full_name}.git"
+            elif scm_type == "bitbucket":
+                clone_url = f"https://bitbucket.org/{full_name}.git"
+            else:
+                clone_url = f"https://github.com/{full_name}.git"
+
+    # Resolve authenticated clone URL so the TS agent can clone without Python deps
+    if installation_id and scm_type == "github":
+        try:
+            from apps.api.scm.github import GitHubTokenManager
+            token = await GitHubTokenManager().get_installation_token(int(installation_id))
+            clone_url = f"https://x-access-token:{token}@github.com/{full_name}.git"
+        except Exception as e:
+            log.warning("token_fetch_failed_using_public_url", error=str(e))
+    elif scm_type in ("gitlab", "bitbucket") and conn:
+        try:
+            from apps.api.core.security import decrypt_scm_token
+            raw = decrypt_scm_token(conn.encrypted_token) if conn.encrypted_token else None
+            if raw:
+                if scm_type == "gitlab":
+                    from apps.api.scm.gitlab import authenticated_clone_url
+                    clone_url = authenticated_clone_url(raw, clone_url, full_name)
+                else:
+                    from apps.api.scm.bitbucket import authenticated_clone_url as bb_auth
+                    clone_url = bb_auth(raw, clone_url, full_name)
+        except Exception as e:
+            log.warning("oauth_clone_url_failed", error=str(e), scm_type=scm_type)
+
+    repo_context = {}
+    if repo:
+        repo_context = {
+            "repoType": getattr(repo, "repo_type", None) or "",
+            "language": getattr(repo, "language", None) or "",
+            "observabilityBackend": getattr(repo, "observability_backend", None),
+            "contextSummary": getattr(repo, "context_summary", None),
+        }
+
+    return {
+        "jobId": str(job.id),
+        "tenantId": str(job.tenant_id),
+        "repoId": str(job.repo_id),
+        "repoFullName": full_name,
+        "cloneUrl": clone_url,
+        "ref": job.branch_ref or (repo.default_branch if repo else "main"),
+        "scmType": scm_type,
+        "changedFiles": job.changed_files.get("files", []) if job.changed_files else None,
+        "analysisType": job.analysis_type,
+        "llmProvider": getattr(job, "llm_provider", "anthropic"),
+        "repoContext": repo_context,
+    }
+
+
+async def _persist_analysis_result(job_id: str, tenant_id: str, result: dict) -> None:
+    """Persist the TS agent response into analysis_results and findings tables."""
+    import uuid as _uuid
+    from decimal import Decimal
+    from sqlalchemy.orm import class_mapper
+    from apps.api.core.database import AsyncSessionFactory
+    from apps.api.models.analysis import AnalysisResult, Finding as FindingModel
+
+    token_usage = result.get("tokenUsage", {})
+    scores = result.get("scores", {})
+    findings_data = result.get("findings", [])
+    agent_breakdown = result.get("agentBreakdown")
+    crossrun_summary = result.get("crossrunSummary")
+
+    # Only pass JSONB columns accepted by the loaded ORM (avoids TypeError if worker
+    # image lags migrations — see AnalysisResult.agent_breakdown / crossrun_summary).
+    _cols = {c.key for c in class_mapper(AnalysisResult).columns}
+    _optional = {}
+    if "agent_breakdown" in _cols:
+        _optional["agent_breakdown"] = agent_breakdown
+    elif agent_breakdown is not None:
+        log.warning(
+            "analysis_result_orm_missing_column",
+            column="agent_breakdown",
+            hint="Redeploy worker/API so apps/api/models/analysis.py includes agent_breakdown",
+        )
+    if "crossrun_summary" in _cols:
+        _optional["crossrun_summary"] = crossrun_summary
+    elif crossrun_summary is not None:
+        log.warning(
+            "analysis_result_orm_missing_column",
+            column="crossrun_summary",
+            hint="Redeploy worker/API so apps/api/models/analysis.py includes crossrun_summary",
+        )
+
+    async with AsyncSessionFactory() as session:
+        analysis_result = AnalysisResult(
+            job_id=_uuid.UUID(job_id),
+            tenant_id=_uuid.UUID(tenant_id),
+            score_global=scores.get("global", 0),
+            score_metrics=scores.get("metrics", 0),
+            score_logs=scores.get("logs", 0),
+            score_traces=scores.get("traces", 0),
+            score_cost=scores.get("cost", 0),
+            score_snr=scores.get("snr", 0),
+            score_pipeline=scores.get("pipeline", 0),
+            score_compliance=scores.get("compliance", 0),
+            findings=findings_data,
+            raw_llm_calls=token_usage.get("llmCalls", 0),
+            input_tokens_total=token_usage.get("promptTokens", 0),
+            output_tokens_total=token_usage.get("completionTokens", 0),
+            cost_usd=Decimal(str(token_usage.get("costUsd", 0))),
+            **_optional,
+        )
+        session.add(analysis_result)
+        await session.flush()
+
+        _finding_cols = {c.key for c in class_mapper(FindingModel).columns}
+
+        for f in findings_data:
+            _f_opt: dict = {}
+            _f_extra = {
+                "source_agent": f.get("sourceAgent"),
+                "prompt_mode": f.get("promptMode"),
+                "verified": f.get("verified", False),
+                "confidence": f.get("confidence"),
+                "reasoning_excerpt": f.get("reasoning"),
+            }
+            for k, v in _f_extra.items():
+                if k in _finding_cols:
+                    _f_opt[k] = v
+
+            finding = FindingModel(
+                result_id=analysis_result.id,
+                tenant_id=_uuid.UUID(tenant_id),
+                pillar=f.get("pillar", "traces"),
+                severity=f.get("severity", "info"),
+                dimension=f.get("dimension", "coverage"),
+                title=f.get("title", ""),
+                description=f.get("description", ""),
+                file_path=f.get("filePath"),
+                line_start=f.get("lineStart"),
+                line_end=f.get("lineEnd"),
+                suggestion=f.get("suggestion"),
+                estimated_monthly_cost_impact=Decimal(str(f.get("estimatedMonthlyCostImpact", 0))),
+                **_f_opt,
+            )
+            session.add(finding)
+
+        await session.commit()
 
 
 async def _save_pr_url(job_id: str, pr_url: str) -> None:

@@ -137,6 +137,8 @@ async def run_analysis_graph(job_id: str) -> None:
     Entry point for running analysis. Called by the Celery worker.
     Loads the job from DB, builds initial state, runs the graph.
     """
+    import structlog
+    structlog.contextvars.bind_contextvars(job_id=job_id)
     log.info("analysis_graph_started", job_id=job_id)
 
     try:
@@ -152,6 +154,14 @@ async def run_analysis_graph(job_id: str) -> None:
         if not job:
             log.error("analysis_job_not_found", job_id=job_id)
             return
+
+        # Enrich all subsequent logs in this graph run with core job identifiers
+        structlog.contextvars.bind_contextvars(
+            tenant_id=str(job.tenant_id),
+            repo_id=str(job.repo_id),
+            analysis_type=job.analysis_type,
+            llm_provider=getattr(job, "llm_provider", "anthropic"),
+        )
 
         async with AsyncSessionFactory() as session:
             repo_result = await session.execute(select(Repository).where(Repository.id == job.repo_id))
@@ -210,6 +220,7 @@ async def run_analysis_graph(job_id: str) -> None:
                 "commit_sha": job.commit_sha,
                 "changed_files": job.changed_files.get("files", []) if job.changed_files else [],
                 "analysis_type": job.analysis_type,
+                "llm_provider": getattr(job, "llm_provider", "anthropic"),
                 "installation_id": installation_id,
                 "scm_type": scm_type,
                 "repo_context": repo_context,

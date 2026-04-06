@@ -73,8 +73,12 @@ def log_llm_call(
       cost_usd, findings_count, prompt_version, cache_hit, timestamp
     """
     try:
-        # Approximate cost per model family
-        if "haiku" in model.lower():
+        # Approximate cost per model family.
+        # CerebraAI is self-hosted — monetary cost is $0 (infra billed separately).
+        provider = state.get("request", {}).get("llm_provider", "anthropic")
+        if provider == "cerebra_ai":
+            cost = 0.0
+        elif "haiku" in model.lower():
             cost = (input_tokens * 0.8 + output_tokens * 4.0) / 1_000_000
         else:
             cost = (input_tokens * 3.0 + output_tokens * 15.0) / 1_000_000

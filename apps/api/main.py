@@ -1,9 +1,13 @@
 """Lumis API — FastAPI application entry point."""
 from __future__ import annotations
 
+import time
+import uuid
+
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from apps.api.core.config import settings
 from apps.api.core.logging import configure_logging
@@ -13,6 +17,42 @@ from apps.api.routers.rag import router as rag_router
 
 configure_logging()
 log = structlog.get_logger(__name__)
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """Log each HTTP request as a structured JSON event."""
+
+    _SKIP_PATHS = frozenset({"/health", "/ready", "/docs", "/redoc", "/openapi.json"})
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path in self._SKIP_PATHS:
+            return await call_next(request)
+
+        request_id = str(uuid.uuid4())
+        t0 = time.monotonic()
+
+        # Make request_id available downstream (e.g. in routers)
+        structlog.contextvars.bind_contextvars(request_id=request_id)
+
+        response = await call_next(request)
+
+        duration_ms = round((time.monotonic() - t0) * 1000)
+        tenant_id = getattr(request.state, "tenant_id", None)
+
+        log.info(
+            "http_request",
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            duration_ms=duration_ms,
+            tenant_id=tenant_id,
+            request_id=request_id,
+        )
+
+        # Clear per-request contextvars so they don't bleed into the next request
+        structlog.contextvars.unbind_contextvars("request_id")
+
+        return response
 
 
 def create_app() -> FastAPI:
@@ -31,6 +71,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RequestLoggingMiddleware)
 
     # Public endpoints
     app.include_router(auth.router, prefix="/auth", tags=["auth"])

@@ -6,6 +6,9 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from apps.agent.core.config import settings
+from apps.agent.core.logging import configure_logging
+
+configure_logging()
 
 app = FastAPI(title="Lumis Agent", version="0.1.0")
 log = structlog.get_logger(__name__)

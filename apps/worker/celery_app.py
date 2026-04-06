@@ -3,8 +3,15 @@ from __future__ import annotations
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_process_init
 
 from apps.api.core.config import settings
+
+
+@worker_process_init.connect
+def _configure_worker_logging(**kwargs):
+    from apps.worker.core.logging import configure_logging
+    configure_logging()
 
 celery_app = Celery(
     "lumis",

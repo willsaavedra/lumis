@@ -138,6 +138,7 @@ CREATE TABLE analysis_jobs (
   branch_ref        TEXT,
   changed_files     JSONB,
   analysis_type     analysis_type_enum NOT NULL DEFAULT 'full',
+  llm_provider      TEXT NOT NULL DEFAULT 'anthropic',
   credits_reserved  INT NOT NULL DEFAULT 0,
   credits_consumed  INT,
   error_message     TEXT,

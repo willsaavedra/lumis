@@ -1,0 +1,40 @@
+---
+description: Structured JSON logging (structlog), contextvars, and agent observability events for API, Agent, and Worker
+alwaysApply: true
+---
+
+# Logging estruturado (Lumis)
+
+Use **structlog** com o mesmo pipeline em todos os serviços Python: `merge_contextvars` → `add_log_level` → `add_logger_name` → `TimeStamper(iso)` → `StackInfoRenderer` → `JSONRenderer` (produção) ou `ConsoleRenderer` (dev).
+
+## Onde configurar
+
+| Serviço | Módulo | Entrada |
+|---------|--------|---------|
+| API | `apps/api/core/logging.py` | `configure_logging()` antes do app em `apps/api/main.py` |
+| Agent | `apps/agent/core/logging.py` | `configure_logging()` em `apps/agent/server.py` (antes do `FastAPI`) |
+| Worker | `apps/worker/core/logging.py` | `configure_logging()` no sinal Celery `worker_process_init` em `apps/worker/celery_app.py` |
+
+## Contextvars obrigatórios
+
+- **Global (por processo):** ao final de cada `configure_logging()`, `structlog.contextvars.bind_contextvars(service="api"|"agent"|"worker")`.
+- **Por job / tarefa:** `job_id` e `tenant_id` quando disponíveis — no agente em `run_analysis_graph` após carregar o job; no worker no início de tasks como `run_analysis` / `create_fix_pr` (limpar contexto entre tasks se necessário).
+- **API:** middleware em `apps/api/main.py` gera `request_id` por requisição e loga `http_request` (method, path, status_code, duration_ms, tenant_id, request_id).
+
+## Convenção de eventos
+
+- O **primeiro argumento** posicional do logger é o nome do evento (`event`), em `snake_case`: `log.info("node_started", node="...", ...)`.
+- Campos extras são kwargs estruturados (não interpolar strings longas no texto da mensagem).
+- Bibliotecas ruidosas: manter níveis altos (ex.: `uvicorn.access`, `sqlalchemy.engine`, `httpx`, `kombu`).
+
+## Agente (raciocínio e pipeline)
+
+- Nós LangGraph: `node_started` / `node_completed` com `duration_ms` e métricas úteis do nó.
+- Cobertura LLM (`analyze_coverage`): `llm_batch_started`, `llm_batch_completed`; por finding: `finding_emitted` (incluir `reasoning` quando existir) e `finding_suppressed` (`reasoning` `low_confidence` ou `lumis_ignore` no pré-triage).
+- Tokens/latência de chamadas LLM: manter o fluxo existente (`log_llm_call` / adapter) alinhado aos eventos de batch.
+
+## Novos código / alterações
+
+- Novos pontos de entrada de processo Python no monorepo devem chamar o `configure_logging()` do serviço correspondente e respeitar o bind de `service`.
+- Novos workers ou tasks Celery devem bindar `job_id` (e `tenant_id` quando possível) antes de logs relevantes.
+- Não persistir campos só de diagnóstico (ex.: `reasoning` bruto do LLM) no banco salvo orientação explícita do produto; podem ir só em logs.

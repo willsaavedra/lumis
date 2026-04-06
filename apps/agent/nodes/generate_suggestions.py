@@ -30,14 +30,25 @@ async def generate_suggestions_node(state: AgentState) -> dict:
       - full:       up to 10 findings
       - repository: up to 25 findings
     """
+    import time as _time
+    _t0 = _time.monotonic()
     analysis_type = state.get("request", {}).get("analysis_type", "full")
     cap = _SUGGESTION_CAPS.get(analysis_type, 10)
+    findings_in = len(state.get("findings", []))
 
+    log.info(
+        "node_started",
+        node="generate_suggestions",
+        analysis_type=analysis_type,
+        findings_in=findings_in,
+        cap=cap,
+    )
     await publish_progress(state, "generating", 82, "Generating code suggestions...")
 
     findings = state.get("findings", [])
 
     if cap == 0:
+        log.info("node_completed", node="generate_suggestions", skipped=True, duration_ms=round((_time.monotonic() - _t0) * 1000))
         await publish_progress(state, "generating", 88, "Suggestions skipped for quick analysis.")
         return {"findings": findings}
 
@@ -49,6 +60,7 @@ async def generate_suggestions_node(state: AgentState) -> dict:
     ]
 
     if not actionable:
+        log.info("node_completed", node="generate_suggestions", skipped=True, reason="no_actionable_findings", duration_ms=round((_time.monotonic() - _t0) * 1000))
         await publish_progress(state, "generating", 88, "Suggestions complete.")
         return {"findings": findings}
 
@@ -80,6 +92,12 @@ async def generate_suggestions_node(state: AgentState) -> dict:
         except Exception as e:
             log.warning("suggestion_generation_failed", error=str(e))
 
+    log.info(
+        "node_completed",
+        node="generate_suggestions",
+        findings_processed=len(actionable[:cap]),
+        duration_ms=round((_time.monotonic() - _t0) * 1000),
+    )
     await publish_progress(state, "generating", 88, "Code suggestions generated.")
     return {"findings": updated_findings}
 
@@ -109,10 +127,11 @@ async def _generate_batch_suggestions(
         "code_after":  str | None, # corrected version of those exact lines
       }
     """
-    from anthropic import Anthropic
     from apps.agent.core.config import settings
+    from apps.agent.llm.chat_completion import chat_complete
 
-    client = Anthropic(api_key=settings.anthropic_api_key)
+    provider = state.get("request", {}).get("llm_provider", "anthropic")
+    model = settings.cerebra_ai_model_primary if provider == "cerebra_ai" else settings.anthropic_model_primary
 
     # Determine primary language from the batch
     lang = "python"
@@ -195,11 +214,7 @@ async def _generate_batch_suggestions(
 
     findings_text = json.dumps(findings_with_context, indent=2)
 
-    t0 = time.monotonic()
-    message = client.messages.create(
-        model=settings.anthropic_model_primary,
-        max_tokens=4000,
-        system=f"""You are an expert SRE generating targeted observability fixes in {lang}.
+    system_prompt = f"""You are an expert SRE generating targeted observability fixes in {lang}.
 {sdk_constraint}
 
 Rules:
@@ -209,10 +224,9 @@ Rules:
 - code_after: the corrected replacement for those exact lines, using the same indentation.
   If additive, show only the new lines to add.
 - suggestion: one sentence explaining what to change and why.
-- Be concise. Include only syntactically correct {lang} code.""",
-        messages=[{
-            "role": "user",
-            "content": f"""Generate a targeted fix for each finding below.
+- Be concise. Include only syntactically correct {lang} code."""
+
+    user_prompt = f"""Generate a targeted fix for each finding below.
 
 Return a JSON array — one object per finding, same order:
 [
@@ -227,15 +241,27 @@ Return a JSON array — one object per finding, same order:
 Findings (with surrounding context and candidate lines):
 {findings_text}
 
-Return ONLY the JSON array, no markdown fences.""",
-        }],
+Return ONLY the JSON array, no markdown fences."""
+
+    t0 = time.monotonic()
+    llm_resp = await chat_complete(
+        system=system_prompt,
+        user=user_prompt,
+        model=model,
+        max_tokens=4000,
+        provider=provider,
+        base_url=settings.cerebra_ai_base_url,
+        api_key=settings.anthropic_api_key if provider == "anthropic" else settings.cerebra_ai_api_key,
+        temperature=settings.cerebra_ai_temperature if provider == "cerebra_ai" else 0.3,
+        top_p=settings.cerebra_ai_top_p if provider == "cerebra_ai" else 1.0,
+        timeout=settings.cerebra_ai_timeout if provider == "cerebra_ai" else 120,
     )
     latency_ms = (time.monotonic() - t0) * 1000
 
     fallback = {"suggestion": "See documentation for instrumentation guidance.", "code_before": None, "code_after": None}
     results: list[dict] = []
     try:
-        raw = message.content[0].text.strip()
+        raw = llm_resp.text.strip()
         if "```" in raw:
             raw = raw.split("```")[1]
             if raw.startswith("json"):
@@ -256,9 +282,9 @@ Return ONLY the JSON array, no markdown fences.""",
     log_llm_call(
         state=state,
         node="generate_suggestions",
-        model=settings.anthropic_model_primary,
-        input_tokens=message.usage.input_tokens,
-        output_tokens=message.usage.output_tokens,
+        model=model,
+        input_tokens=llm_resp.input_tokens,
+        output_tokens=llm_resp.output_tokens,
         latency_ms=latency_ms,
         findings_count=len(findings),
         prompt_version=PROMPT_VERSION,

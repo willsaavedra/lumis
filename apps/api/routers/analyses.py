@@ -5,7 +5,7 @@ import asyncio
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Literal
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -93,6 +93,7 @@ class TriggerAnalysisRequest(BaseModel):
     repo_id: str
     ref: str = "main"
     analysis_type: str = "full"
+    llm_provider: Literal["anthropic", "cerebra_ai"] = "anthropic"
     changed_files: list[str] | None = Field(
         default=None,
         description="Paths relative to repo root (files or dirs). Required for quick; optional for full/repository.",
@@ -129,6 +130,7 @@ class AnalysisJobResponse(BaseModel):
     status: str
     trigger: str
     analysis_type: str
+    llm_provider: str = "anthropic"
     branch_ref: str | None = None
     pr_number: int | None
     commit_sha: str | None
@@ -164,6 +166,7 @@ async def trigger_analysis(body: TriggerAnalysisRequest, current: CurrentUser) -
             body.ref,
             body.analysis_type,
             changed_files=body.changed_files,
+            llm_provider=body.llm_provider,
         )
         loaded = await session.execute(
             select(AnalysisJob)
@@ -506,6 +509,7 @@ def _job_to_response(job: AnalysisJob) -> AnalysisJobResponse:
         status=job.status,
         trigger=job.trigger,
         analysis_type=job.analysis_type,
+        llm_provider=getattr(job, "llm_provider", None) or "anthropic",
         branch_ref=job.branch_ref,
         pr_number=job.pr_number,
         commit_sha=job.commit_sha,

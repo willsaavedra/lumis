@@ -209,7 +209,10 @@ async def create_fix_pr(job_id: str) -> str:
                 continue
 
             original = full_path.read_text(encoding="utf-8", errors="replace")
-            raw_fixed = await _generate_fixed_file(original, file_path, file_findings)
+            raw_fixed = await _generate_fixed_file(
+                original, file_path, file_findings,
+                llm_provider=getattr(job, "llm_provider", "anthropic"),
+            )
 
             if not raw_fixed or raw_fixed.strip() == original.strip():
                 log.info("file_unchanged_by_claude", file=file_path)
@@ -306,12 +309,17 @@ async def _generate_fixed_file(
     original: str,
     file_path: str,
     findings: list,
+    llm_provider: str = "anthropic",
 ) -> str:
-    """Ask Claude Sonnet to return the complete fixed file."""
-    from anthropic import AsyncAnthropic
+    """Use the configured LLM to return a complete fixed file."""
+    from apps.agent.llm.chat_completion import chat_complete
     from apps.api.core.config import settings
 
-    client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+    model = (
+        settings.cerebra_ai_model_primary
+        if llm_provider == "cerebra_ai"
+        else settings.anthropic_model_primary
+    )
 
     findings_desc = "\n".join(
         f"- Line {f.line_start}: [{f.severity.upper()}] {f.title}\n"
@@ -330,10 +338,7 @@ async def _generate_fixed_file(
         log.warning("file_too_large_skipping_fix", file=file_path, chars=len(original))
         return None
 
-    message = await client.messages.create(
-        model=settings.anthropic_model_primary,
-        max_tokens=8000,
-        system=f"""You are an expert SRE engineer fixing observability issues in {lang}.
+    system_prompt = f"""You are an expert SRE engineer fixing observability issues in {lang}.
 
 TASK: Fix ONLY the listed observability issues. Return the complete file.
 
@@ -355,10 +360,9 @@ ALLOWED changes:
 - Adding trace context propagation to existing calls
 - Fixing high-cardinality metric labels
 
-Use OpenTelemetry SDK (vendor-neutral). Return ONLY the complete file — no explanations, no markdown fences.""",
-        messages=[{
-            "role": "user",
-            "content": f"""Fix the following observability issues in this {lang} file.
+Use OpenTelemetry SDK (vendor-neutral). Return ONLY the complete file — no explanations, no markdown fences."""
+
+    user_prompt = f"""Fix the following observability issues in this {lang} file.
 
 FILE: {file_path}
 
@@ -368,11 +372,22 @@ ISSUES TO FIX (observability only):
 ORIGINAL FILE:
 {original}
 
-Return the complete fixed file. Touch only what is needed for the listed issues.""",
-        }],
+Return the complete fixed file. Touch only what is needed for the listed issues."""
+
+    llm_resp = await chat_complete(
+        system=system_prompt,
+        user=user_prompt,
+        model=model,
+        max_tokens=8000,
+        provider=llm_provider,
+        base_url=settings.cerebra_ai_base_url,
+        api_key=settings.anthropic_api_key if llm_provider == "anthropic" else settings.cerebra_ai_api_key,
+        temperature=settings.cerebra_ai_temperature if llm_provider == "cerebra_ai" else 0.3,
+        top_p=settings.cerebra_ai_top_p if llm_provider == "cerebra_ai" else 1.0,
+        timeout=settings.cerebra_ai_timeout,
     )
 
-    fixed = message.content[0].text.strip()
+    fixed = llm_resp.text.strip()
     if fixed.startswith("```"):
         lines = fixed.split("\n")
         fixed = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])

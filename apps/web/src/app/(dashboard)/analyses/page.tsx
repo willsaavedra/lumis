@@ -5,7 +5,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { analysesApi, reposApi, type AnalysisJob, type AnalysisListParams } from '@/lib/api'
 import { ScmLogo } from '@/components/ScmLogo'
-import { getScoreColor, formatRelativeTime, getScoreGrade } from '@/lib/utils'
+import { getScoreColor, formatRelativeTime, getScoreGrade, formatLlmProvider } from '@/lib/utils'
 
 const PAGE_SIZES = [10, 20, 50] as const
 const SORT_COLUMNS: { key: AnalysisListParams['sort']; label: string }[] = [
@@ -209,6 +209,9 @@ export default function AnalysesPage() {
               <SortableTh label="Repo" column="repo" sort={sort} order={order} onSort={toggleSort} />
               <SortableTh label="Trigger" column="trigger" sort={sort} order={order} onSort={toggleSort} />
               <SortableTh label="Type" column="analysis_type" sort={sort} order={order} onSort={toggleSort} />
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                LLM
+              </th>
               <SortableTh label="Status" column="status" sort={sort} order={order} onSort={toggleSort} />
               <SortableTh label="Score" column="score_global" sort={sort} order={order} onSort={toggleSort} />
               <SortableTh label="Credits" column="credits_consumed" sort={sort} order={order} onSort={toggleSort} />
@@ -221,7 +224,7 @@ export default function AnalysesPage() {
           <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
             {items.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-10 text-center text-sm text-gray-400 dark:text-gray-500">
+                <td colSpan={9} className="px-4 py-10 text-center text-sm text-gray-400 dark:text-gray-500">
                   No analyses match your filters.
                 </td>
               </tr>
@@ -251,6 +254,9 @@ export default function AnalysesPage() {
                   </span>
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{job.analysis_type}</td>
+                <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                  {formatLlmProvider(job.llm_provider)}
+                </td>
                 <td className="px-4 py-3">
                   <StatusBadge status={job.status} />
                 </td>

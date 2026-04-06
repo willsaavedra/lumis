@@ -11,8 +11,7 @@ import { ObsBackendLogo } from '@/components/ObsBackendLogo'
 import { InstrumentationLogo, instrumentationLabel } from '@/components/InstrumentationLogo'
 import { InstrumentationRecommendationCard } from '@/components/InstrumentationRecommendationCard'
 import { getInstrumentationRecommendation } from '@/lib/instrumentation-recommendation'
-import { formatDate } from '@/lib/utils'
-import { getScoreColor, getScoreGrade, cn } from '@/lib/utils'
+import { formatDate, formatLlmProvider, getScoreColor, getScoreGrade, cn } from '@/lib/utils'
 
 function statusBadge(status: string) {
   const map: Record<string, string> = {
@@ -251,6 +250,8 @@ export default function RepositoryDetailPage() {
                     · Ref {latestRepoJob.branch_ref}
                   </>
                 )}
+                {' '}
+                · LLM {formatLlmProvider(latestRepoJob.llm_provider)}
               </p>
               <Link
                 href={`/analyses/${latestRepoJob.id}`}
@@ -283,6 +284,7 @@ export default function RepositoryDetailPage() {
                 <tr className="border-b border-gray-200 dark:border-gray-800 text-left text-gray-500 dark:text-gray-400">
                   <th className="px-6 py-3 font-medium">Started</th>
                   <th className="px-6 py-3 font-medium">Type</th>
+                  <th className="px-6 py-3 font-medium">LLM</th>
                   <th className="px-6 py-3 font-medium">Status</th>
                   <th className="px-6 py-3 font-medium">Score</th>
                   <th className="px-6 py-3 font-medium w-24" />
@@ -293,6 +295,7 @@ export default function RepositoryDetailPage() {
                   <tr key={job.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
                     <td className="px-6 py-3 text-gray-900 dark:text-gray-100 whitespace-nowrap">{formatDate(job.created_at)}</td>
                     <td className="px-6 py-3 capitalize text-gray-700 dark:text-gray-300">{job.analysis_type.replace(/_/g, ' ')}</td>
+                    <td className="px-6 py-3 text-gray-700 dark:text-gray-300 whitespace-nowrap">{formatLlmProvider(job.llm_provider)}</td>
                     <td className="px-6 py-3">{statusBadge(job.status)}</td>
                     <td className="px-6 py-3 tabular-nums text-gray-900 dark:text-gray-100">
                       {job.status === 'completed' && job.score_global != null ? job.score_global : '—'}

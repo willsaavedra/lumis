@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, Text, func
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, Numeric, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -39,6 +39,7 @@ class AnalysisJob(Base):
         Enum("quick", "full", "repository", "context", name="analysis_type_enum"),
         nullable=False, default="full",
     )
+    llm_provider: Mapped[str] = mapped_column(Text, nullable=False, default="anthropic")
     credits_reserved: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     billing_reservation: Mapped[dict | None] = mapped_column(JSONB)
     credits_consumed: Mapped[int | None] = mapped_column(Integer)
@@ -73,6 +74,7 @@ class AnalysisResult(Base):
     score_compliance: Mapped[int | None] = mapped_column(Integer)
     previous_job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("analysis_jobs.id", ondelete="SET NULL"), nullable=True)
     crossrun_summary: Mapped[dict | None] = mapped_column(JSONB)
+    agent_breakdown: Mapped[dict | None] = mapped_column(JSONB)
     findings: Mapped[dict | None] = mapped_column(JSONB)
     call_graph_path: Mapped[str | None] = mapped_column(Text)
     raw_llm_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -94,15 +96,9 @@ class Finding(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     result_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("analysis_results.id", ondelete="CASCADE"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"))
-    pillar: Mapped[str] = mapped_column(
-        Enum("metrics", "logs", "traces", "iac", "pipeline", name="pillar_enum"), nullable=False
-    )
-    severity: Mapped[str] = mapped_column(
-        Enum("critical", "warning", "info", name="severity_enum"), nullable=False
-    )
-    dimension: Mapped[str] = mapped_column(
-        Enum("cost", "snr", "pipeline", "compliance", "coverage", name="dimension_enum"), nullable=False
-    )
+    pillar: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[str] = mapped_column(Text, nullable=False)
+    dimension: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     file_path: Mapped[str | None] = mapped_column(Text)
@@ -110,6 +106,11 @@ class Finding(Base):
     line_end: Mapped[int | None] = mapped_column(Integer)
     suggestion: Mapped[str | None] = mapped_column(Text)
     estimated_monthly_cost_impact: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
+    source_agent: Mapped[str | None] = mapped_column(Text)
+    prompt_mode: Mapped[str | None] = mapped_column(Text)
+    verified: Mapped[bool] = mapped_column(default=False)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    reasoning_excerpt: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     result: Mapped[AnalysisResult] = relationship(back_populates="findings_list")

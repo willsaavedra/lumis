@@ -186,6 +186,9 @@ async def pre_triage_node(state: AgentState) -> dict:
       - full:       whole repo (or optional path scope), LLM classification for ambiguous files
       - repository: prioritized deep walk (src/, cmd/, … first), then rest; LLM classification
     """
+    import time as _time
+    _t0 = _time.monotonic()
+    log.info("node_started", node="pre_triage", analysis_type=state.get("request", {}).get("analysis_type"))
     await publish_progress(state, "triaging", 15, "Classifying changed files...")
 
     request = state["request"]
@@ -270,13 +273,23 @@ async def pre_triage_node(state: AgentState) -> dict:
     suppressed = _scan_lumis_ignore(classified)
     if suppressed:
         log.info("lumis_ignore_found", count=len(suppressed), job_id=state["job_id"])
+        for s in suppressed:
+            log.info(
+                "finding_suppressed",
+                node="pre_triage",
+                reason="lumis_ignore",
+                file_path=s.get("file_path"),
+                line=s.get("line"),
+            )
 
     log.info(
-        "triage_complete",
+        "node_completed",
+        node="pre_triage",
         analysis_type=analysis_type,
-        total=len(classified),
-        relevant=relevant_count,
-        job_id=state["job_id"],
+        total_files=len(classified),
+        relevant_files=relevant_count,
+        lumis_ignore_count=len(suppressed),
+        duration_ms=round((_time.monotonic() - _t0) * 1000),
     )
     await publish_progress(state, "triaging", 20, f"Found {relevant_count} relevant files.")
 
@@ -308,34 +321,70 @@ async def _llm_classify(
     ambiguous: list[dict],
     state: AgentState,
 ) -> list[dict]:
-    """Use Haiku to classify ambiguous files."""
-    from anthropic import Anthropic
+    """Use triage model to classify ambiguous files by observability relevance."""
     from apps.agent.core.config import settings
+    from apps.agent.llm.chat_completion import chat_complete
 
-    client = Anthropic(api_key=settings.anthropic_api_key)
+    provider = state.get("request", {}).get("llm_provider", "anthropic")
+    model = settings.cerebra_ai_model_triage if provider == "cerebra_ai" else settings.anthropic_model_triage
     file_list = "\n".join(f"- {f['path']}" for f in ambiguous)
 
-    message = client.messages.create(
-        model=settings.anthropic_model_triage,
-        max_tokens=1024,
-        messages=[
-            {
-                "role": "user",
-                "content": f"""Classify each file by observability relevance (0=irrelevant, 1=low, 2=high).
-High relevance: business logic, HTTP handlers, DB calls, queue consumers, error handling.
-Low relevance: utilities, helpers, configs.
-Irrelevant: tests, assets, generated code, docs.
-
-Files:
-{file_list}
-
-Reply with ONLY a JSON array, no explanation: [{{"path": "...", "score": 0|1|2}}, ...]""",
-            },
-            {"role": "assistant", "content": "["},
-        ],
+    classification_instruction = (
+        "Classify each file by observability relevance (0=irrelevant, 1=low, 2=high).\n"
+        "High relevance: business logic, HTTP handlers, DB calls, queue consumers, error handling.\n"
+        "Low relevance: utilities, helpers, configs.\n"
+        "Irrelevant: tests, assets, generated code, docs.\n\n"
+        f"Files:\n{file_list}\n\n"
     )
 
-    raw = "[" + message.content[0].text
+    if provider == "cerebra_ai":
+        # CerebraAI / OpenAI-compatible: no assistant prefill — use explicit JSON instruction
+        system_prompt = (
+            "You are a file classifier. Return ONLY a valid JSON array. "
+            "No markdown fences, no explanation, no extra text. Start directly with [."
+        )
+        user_prompt = (
+            classification_instruction
+            + 'Return ONLY a JSON array: [{"path": "...", "score": 0|1|2}, ...]'
+        )
+        llm_resp = await chat_complete(
+            system=system_prompt,
+            user=user_prompt,
+            model=model,
+            max_tokens=1024,
+            provider=provider,
+            base_url=settings.cerebra_ai_base_url,
+            api_key=settings.cerebra_ai_api_key,
+            temperature=settings.cerebra_ai_temperature,
+            top_p=settings.cerebra_ai_top_p,
+            timeout=60,
+        )
+        raw = llm_resp.text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        raw = raw.strip()
+    else:
+        # Anthropic: use assistant prefill trick to force JSON array output
+        from anthropic import AsyncAnthropic
+        client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+        message = await client.messages.create(
+            model=model,
+            max_tokens=1024,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        classification_instruction
+                        + 'Reply with ONLY a JSON array, no explanation: [{"path": "...", "score": 0|1|2}, ...]'
+                    ),
+                },
+                {"role": "assistant", "content": "["},
+            ],
+        )
+        raw = "[" + message.content[0].text
+
     # Extract the first complete JSON array from the response
     match = re.search(r'\[.*?\]', raw, re.DOTALL)
     if not match:

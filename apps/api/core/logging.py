@@ -53,3 +53,7 @@ def configure_logging() -> None:
     # Quiet noisy libraries
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    # Bind service identifier so every log event from this process carries it
+    structlog.contextvars.bind_contextvars(service="api")

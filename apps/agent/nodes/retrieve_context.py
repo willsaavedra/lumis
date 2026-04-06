@@ -36,6 +36,9 @@ async def retrieve_context_node(state: AgentState) -> dict:
     Build semantic queries from the current analysis context, retrieve relevant
     knowledge chunks from the global + tenant indexes, and store them in state.
     """
+    import time as _time
+    _t0 = _time.monotonic()
+    log.info("node_started", node="retrieve_context")
     await publish_progress(state, "retrieving", 38, "Retrieving knowledge base context...")
 
     from apps.api.core.config import settings
@@ -43,6 +46,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
     # Skip retrieval if OpenAI key is not set (graceful degradation)
     if not settings.openai_api_key:
         log.warning("retrieve_context_skipped_no_openai_key")
+        log.info("node_completed", node="retrieve_context", skipped=True, reason="no_openai_key", duration_ms=round((_time.monotonic() - _t0) * 1000))
         return {"rag_context": None}
 
     try:
@@ -57,6 +61,13 @@ async def retrieve_context_node(state: AgentState) -> dict:
             chars=len(rag_context),
             job_id=state.get("job_id"),
         )
+    log.info(
+        "node_completed",
+        node="retrieve_context",
+        has_context=bool(rag_context),
+        context_chars=len(rag_context) if rag_context else 0,
+        duration_ms=round((_time.monotonic() - _t0) * 1000),
+    )
     await publish_progress(state, "retrieving", 42, "Knowledge context ready.")
     return {"rag_context": rag_context}
 

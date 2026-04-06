@@ -169,6 +169,7 @@ export default function RepositoriesPage() {
   const [analyzeModal, setAnalyzeModal] = useState<{ repo: Repository } | null>(null)
   const [analyzeType, setAnalyzeType] = useState<'quick' | 'full' | 'repository'>('full')
   const [analyzeBranch, setAnalyzeBranch] = useState('')
+  const [analyzeProvider, setAnalyzeProvider] = useState<'anthropic' | 'cerebra_ai'>('anthropic')
   const [quickScope, setQuickScope] = useState<ScopeItem[]>([])
   const [editingContextId, setEditingContextId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState<ContextForm>(EMPTY_CONTEXT)
@@ -314,9 +315,10 @@ export default function RepositoriesPage() {
       ref: string
       type: string
       changedFiles?: string[] | null
+      llmProvider?: string
     }) => {
       setAnalyzingId(payload.repoId)
-      return analysesApi.trigger(payload.repoId, payload.ref, payload.type, payload.changedFiles ?? null)
+      return analysesApi.trigger(payload.repoId, payload.ref, payload.type, payload.changedFiles ?? null, payload.llmProvider)
     },
     onSuccess: (data) => {
       toast('Analysis started — results will appear in Analyses', 'success')
@@ -345,6 +347,7 @@ export default function RepositoriesPage() {
     setAnalyzeModal({ repo })
     setAnalyzeType('full')
     setAnalyzeBranch(repo.default_branch)
+    setAnalyzeProvider('anthropic')
     setQuickScope([])
   }
 
@@ -357,6 +360,7 @@ export default function RepositoriesPage() {
       ref: analyzeBranch.trim() || analyzeModal.repo.default_branch,
       type: resolved.analysisType,
       changedFiles: resolved.changedFiles,
+      llmProvider: analyzeProvider,
     })
   }
 
@@ -984,6 +988,41 @@ export default function RepositoriesPage() {
 
                 {/* Right column: branch + path scope — uses horizontal space on large screens */}
                 <div className="lg:col-span-5 space-y-5 min-w-0 lg:border-l lg:border-gray-200 dark:lg:border-gray-700 lg:pl-6 xl:pl-8">
+                  {/* Model selector */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">
+                      Model
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {([
+                        {
+                          value: 'anthropic' as const,
+                          label: 'Claude',
+                          sub: 'Anthropic Sonnet',
+                        },
+                        {
+                          value: 'cerebra_ai' as const,
+                          label: 'CerebraAI',
+                          sub: 'Qwen self-hosted',
+                        },
+                      ]).map((m) => (
+                        <button
+                          key={m.value}
+                          type="button"
+                          onClick={() => setAnalyzeProvider(m.value)}
+                          className={`flex flex-col text-left px-3 py-2.5 rounded-lg border text-xs transition-colors ${
+                            analyzeProvider === m.value
+                              ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 ring-1 ring-gray-900/10 dark:ring-white/10'
+                              : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
+                          }`}
+                        >
+                          <span className="font-medium">{m.label}</span>
+                          <span className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">{m.sub}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3">
                       Run configuration

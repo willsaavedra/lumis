@@ -129,6 +129,25 @@ agent:
       cpu: 2000m
       memory: 2Gi
 
+# ── Agent TS (LangGraph.js — new multi-agent engine) ─────────────────────────
+agentTs:
+  enabled: true
+  image:
+    repository: lumis-agent-ts
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 3000
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
 # ── Worker (Celery) ───────────────────────────────────────────────────────────
 worker:
   enabled: true

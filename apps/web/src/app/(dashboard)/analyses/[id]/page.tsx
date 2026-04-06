@@ -9,10 +9,11 @@ import { useAnalysisProgress } from '@/hooks/useAnalysisProgress'
 import { RepoWebLink } from '@/components/RepoWebLink'
 import { ScmLogo } from '@/components/ScmLogo'
 import { toast } from '@/components/Toast'
-import { getScoreGrade, getScoreColor, getSeverityColor, cn } from '@/lib/utils'
+import { getScoreGrade, getScoreColor, getSeverityColor, cn, formatLlmProvider } from '@/lib/utils'
 import { InstrumentationRecommendationCard } from '@/components/InstrumentationRecommendationCard'
 import { SuggestedFixDiff, suggestedFixIsNoOp } from '@/components/SuggestedFixDiff'
 import { getInstrumentationRecommendation, hasNoInstrumentationFinding } from '@/lib/instrumentation-recommendation'
+import { AnalysisLiveProgress } from '@/components/analysis/AnalysisLiveProgress'
 
 // ── Pillar/severity helpers ───────────────────────────────────────────────────
 
@@ -98,6 +99,10 @@ export default function AnalysisDetailPage({ params }: { params: { id: string } 
     streamError,
     streaming,
     streamHealthy,
+    agentRoster,
+    activeAgent,
+    llmText,
+    currentFiles,
   } = useAnalysisProgress(id, progressEnabled)
   streamHealthyRef.current = streamHealthy
 
@@ -207,7 +212,7 @@ export default function AnalysisDetailPage({ params }: { params: { id: string } 
             </span>
           )}
           {job.repo_full_name && <span className="text-gray-400 dark:text-gray-500">·</span>}
-          Trigger: {job.trigger} · Type: {job.analysis_type}
+          Trigger: {job.trigger} · Type: {job.analysis_type} · LLM: {formatLlmProvider(job.llm_provider)}
           {job.pr_number && ` · PR #${job.pr_number}`}
           {job.commit_sha && ` · ${job.commit_sha.slice(0, 7)}`}
         </p>
@@ -459,63 +464,17 @@ export default function AnalysisDetailPage({ params }: { params: { id: string } 
       )}
 
       {(job.status === 'running' || job.status === 'pending') && (
-        <div
-          className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-6 text-left text-blue-900 dark:text-blue-100"
-          role="status"
-          aria-live="polite"
-        >
-          <div className="flex items-start justify-between gap-4 mb-4">
-            <div>
-              <h2 className="text-lg font-semibold">
-                {streamError ? 'Analysis in progress (live stream unavailable)' : 'Analysis in progress'}
-              </h2>
-              <p className="text-sm text-blue-800/90 dark:text-blue-200/90 mt-1">
-                {latestProgress?.message ??
-                  (streaming ? 'Connecting to live progress…' : 'Waiting for the analysis worker…')}
-              </p>
-            </div>
-            <div className="text-right text-sm tabular-nums shrink-0 text-blue-800 dark:text-blue-200">
-              {latestProgress != null ? `${Math.min(100, Math.max(0, latestProgress.progress_pct))}%` : '—'}
-            </div>
-          </div>
-          <div className="h-2 bg-blue-200/60 dark:bg-blue-950 rounded-full overflow-hidden mb-4">
-            <div
-              className="h-full bg-blue-600 dark:bg-blue-400 transition-all duration-300 ease-out rounded-full"
-              style={{
-                width: `${Math.min(100, Math.max(0, latestProgress?.progress_pct ?? 0))}%`,
-              }}
-            />
-          </div>
-          {streamError && (
-            <p className="text-xs text-amber-800 dark:text-amber-200 mb-3">
-              Could not open live stream ({streamError}). Status still refreshes about every 12s until complete.
-            </p>
-          )}
-          <div className="max-h-52 overflow-y-auto space-y-1.5 text-sm border-t border-blue-200/50 dark:border-blue-800/50 pt-3">
-            {progressEvents.length === 0 ? (
-              <p className="text-blue-700/70 dark:text-blue-300/70 italic text-sm">
-                {streaming ? 'Connecting…' : 'No step updates yet.'}
-              </p>
-            ) : (
-              progressEvents.map((e, i) => (
-                <div
-                  key={`${e.timestamp ?? ''}-${i}-${e.message.slice(0, 24)}`}
-                  className={cn(
-                    'flex gap-2',
-                    i === progressEvents.length - 1 && 'font-medium',
-                  )}
-                >
-                  <span className="shrink-0 text-[11px] uppercase tracking-wide text-blue-600 dark:text-blue-400 w-[5.5rem]">
-                    {e.stage}
-                  </span>
-                  <span className="min-w-0 text-blue-900 dark:text-blue-100">{e.message}</span>
-                </div>
-              ))
-            )}
-          </div>
-          <p className="text-xs text-blue-700/80 dark:text-blue-300/80 mt-4">
-            Results will appear below when the analysis completes.
-          </p>
+        <div className="mb-8">
+          <AnalysisLiveProgress
+            latestProgress={latestProgress}
+            progressEvents={progressEvents}
+            streaming={streaming}
+            streamError={streamError}
+            agentRoster={agentRoster}
+            activeAgent={activeAgent}
+            llmText={llmText}
+            currentFiles={currentFiles}
+          />
         </div>
       )}
 

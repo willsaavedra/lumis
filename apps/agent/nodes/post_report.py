@@ -16,6 +16,9 @@ log = structlog.get_logger(__name__)
 
 async def post_report_node(state: AgentState) -> dict:
     """Save analysis results to DB and post PR comment."""
+    import time as _time
+    _t0 = _time.monotonic()
+    log.info("node_started", node="post_report", findings_in=len(state.get("findings", [])))
     await publish_progress(state, "posting", 90, "Saving results...")
 
     job_id = state["job_id"]
@@ -52,6 +55,13 @@ async def post_report_node(state: AgentState) -> dict:
         shutil.rmtree(state["repo_path"], ignore_errors=True)
         log.info("repo_cleaned_up", path=state["repo_path"])
 
+    log.info(
+        "node_completed",
+        node="post_report",
+        findings_saved=len(findings),
+        has_pr_comment=bool(pr_number),
+        duration_ms=round((_time.monotonic() - _t0) * 1000),
+    )
     await publish_progress(state, "done", 100, "Analysis complete!")
     return {"stage": "done", "progress_pct": 100}
 
