@@ -10,6 +10,7 @@ import structlog
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from apps.api.billing.billing_gate import ANALYSIS_COSTS, BillingGate
 from apps.api.models.analysis import AnalysisJob
@@ -134,6 +135,7 @@ async def estimate_analysis_cost(
     *,
     scope_type: str | None = None,
     llm_provider: str | None = None,
+    ref: str = "main",
 ) -> dict:
     """
     Return a cost estimate for a given scope selection.
@@ -144,13 +146,16 @@ async def estimate_analysis_cost(
         PLAN_INCLUDED_REAL_COST,
     )
     from apps.api.models.auth import Tenant
+    from apps.api.scm.scope_file_count import count_files_in_repo_scope
 
     repo_result = await session.execute(
-        select(Repository).where(
+        select(Repository)
+        .where(
             Repository.id == uuid.UUID(repo_id),
             Repository.tenant_id == uuid.UUID(tenant_id),
             Repository.is_active == True,
         )
+        .options(selectinload(Repository.connection))
     )
     repo = repo_result.scalar_one_or_none()
     if not repo:
@@ -162,14 +167,18 @@ async def estimate_analysis_cost(
         analysis_type = "full" if has_context else "repository"
         estimated_credits = ANALYSIS_COSTS.get(analysis_type, 3)
         file_count = 0
+        path_count = 0
     else:
-        path_count = len([p.strip() for p in paths if p and str(p).strip()])
+        norm_paths = [p.strip() for p in paths if p and str(p).strip()]
+        path_count = len(norm_paths)
         analysis_type = "quick"
-        estimated_credits = min(15, max(1, 1 + path_count // 25))
-        file_count = path_count
+        resolved = await count_files_in_repo_scope(repo, repo.connection, ref, norm_paths)
+        file_count = resolved if resolved is not None else path_count
+        estimated_credits = min(15, max(1, 1 + file_count // 25))
 
     result: dict = {
         "file_count": file_count,
+        "path_count": path_count,
         "estimated_credits": estimated_credits,
         "analysis_type": analysis_type,
     }

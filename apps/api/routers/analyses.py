@@ -119,7 +119,13 @@ class EstimateRequest(BaseModel):
 
 
 class EstimateResponse(BaseModel):
-    file_count: int
+    file_count: int = Field(
+        description="Files in scope after expanding folders (used for cost).",
+    )
+    path_count: int = Field(
+        0,
+        description="Selected paths (files + folders) before folder expansion.",
+    )
     estimated_credits: int
     analysis_type: str
     # Token-based billing fields
@@ -208,6 +214,7 @@ async def estimate_analysis(body: EstimateRequest, current: CurrentUser) -> Esti
             select_all=body.select_all,
             scope_type=body.scope_type,
             llm_provider=body.llm_provider,
+            ref=body.ref,
         )
     return EstimateResponse(**result)
 
