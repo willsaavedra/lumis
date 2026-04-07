@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 import structlog
 
-from apps.agent.nodes.base import publish_progress
+from apps.agent.nodes.base import publish_progress, publish_thought
 from apps.agent.schemas import AgentState, CallGraph, CallNode
 
 log = structlog.get_logger(__name__)
@@ -63,7 +63,7 @@ async def parse_ast_node(state: AgentState) -> dict:
     Parse relevant files with tree-sitter and build a call graph.
     Identifies: entry points, I/O nodes, error paths, and observability imports.
     """
-    await publish_progress(state, "parsing", 25, "Parsing code structure...")
+    await publish_progress(state, "parsing", 25, "Parsing code structure...", stage_index=3)
 
     relevant_files = [f for f in state["changed_files"] if f["relevance_score"] >= 1]
     call_graph = CallGraph()
@@ -104,7 +104,12 @@ async def parse_ast_node(state: AgentState) -> dict:
         io_nodes=len(call_graph.io_nodes),
         files_with_obs=sum(1 for v in file_obs_imports.values() if v != "none"),
     )
-    await publish_progress(state, "parsing", 35, f"Found {len(call_graph.nodes)} code nodes.")
+    await publish_thought(
+        state, "parse_ast",
+        f"Built call graph: {len(call_graph.nodes)} nodes, {len(call_graph.entry_points)} entry points, {len(call_graph.io_nodes)} I/O nodes",
+        status="done",
+    )
+    await publish_progress(state, "parsing", 35, f"Found {len(call_graph.nodes)} code nodes.", stage_index=3)
 
     return {
         "call_graph": {

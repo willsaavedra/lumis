@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 import structlog
 
-from apps.agent.nodes.base import publish_progress
+from apps.agent.nodes.base import publish_progress, publish_thought, publish_finding
 from apps.agent.nodes.instrumentation_hints import (
     error_path_suggestion as _instr_error_suggestion,
     structured_log_suggestion as _instr_log_suggestion,
@@ -85,7 +85,7 @@ _WINDOW = 8  # lines to look ahead after error check for a record call
 
 async def analyze_efficiency_node(state: AgentState) -> dict:
     """Detect observability efficiency issues via pattern matching."""
-    await publish_progress(state, "analyzing", 65, "Analyzing observability efficiency...")
+    await publish_progress(state, "analyzing", 65, "Analyzing observability efficiency...", stage_index=6)
 
     findings: list[dict] = list(state.get("findings", []))
     files = [f for f in state["changed_files"] if f["relevance_score"] >= 1 and f.get("content")]
@@ -94,15 +94,24 @@ async def analyze_efficiency_node(state: AgentState) -> dict:
     repo_context  = state.get("repo_context") or state.get("request", {})
     instrumentation = (repo_context.get("instrumentation") or "").strip().lower() or None
 
+    initial_count = len(findings)
     for file_info in files:
         content = file_info.get("content", "")
         path = file_info["path"]
         lang = file_info.get("language", "")
         new_findings = _analyze_file_efficiency(content, path, lang, instrumentation)
-        findings.extend(new_findings)
+        for f in new_findings:
+            findings.append(f)
+            await publish_finding(state, f, "analyze_efficiency")
 
+    added = len(findings) - initial_count
     log.info("efficiency_analysis_complete", total_findings=len(findings))
-    await publish_progress(state, "analyzing", 70, f"Efficiency analysis complete: {len(findings)} findings.")
+    await publish_thought(
+        state, "analyze_efficiency",
+        f"Pattern-matched {len(files)} files — {added} efficiency findings added",
+        status="done",
+    )
+    await publish_progress(state, "analyzing", 70, f"Efficiency analysis complete: {len(findings)} findings.", stage_index=6)
     return {"findings": findings}
 
 

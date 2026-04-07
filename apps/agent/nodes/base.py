@@ -61,15 +61,174 @@ async def publish_progress(
     stage: str,
     progress_pct: int,
     message: str,
+    *,
+    stage_index: int | None = None,
+    files_analyzed: int | None = None,
+    files_total: int | None = None,
+    current_file: str | None = None,
 ) -> None:
     """Publish pipeline step to Redis (live + timeline)."""
+    extra: dict = {}
+    if stage_index is not None:
+        extra["stage_index"] = stage_index
+    if files_analyzed is not None:
+        extra["files_analyzed"] = files_analyzed
+    if files_total is not None:
+        extra["files_total"] = files_total
+    if current_file is not None:
+        extra["current_file"] = current_file
+
+    usage = state.get("token_usage") or {}
+    extra["tokens_input"] = usage.get("input_tokens", 0)
+    extra["tokens_output"] = usage.get("output_tokens", 0)
+    extra["cost_usd_so_far"] = usage.get("cost_usd", 0.0)
+
+    findings = state.get("findings") or []
+    extra["findings_count"] = {
+        "critical": sum(1 for f in findings if f.get("severity") == "critical"),
+        "warning": sum(1 for f in findings if f.get("severity") == "warning"),
+        "info": sum(1 for f in findings if f.get("severity") == "info"),
+    }
+
+    state["progress_pct"] = progress_pct  # type: ignore[index]
+
     await publish_analysis_event(
         str(state["job_id"]),
         str(state["tenant_id"]),
         stage,
         progress_pct,
         message,
-        event_type="step",
+        event_type="progress",
+        extra=extra,
+    )
+
+
+async def publish_thought(
+    state: AgentState,
+    node: str,
+    text: str,
+    *,
+    model: str | None = None,
+    status: str = "done",
+    files: list[str] | None = None,
+) -> None:
+    """Emit a reasoning thought for the live stream UI."""
+    extra: dict = {
+        "node": node,
+        "model": model,
+        "status": status,
+        "text": text,
+    }
+    if files:
+        extra["files"] = files
+    await publish_analysis_event(
+        str(state["job_id"]),
+        str(state["tenant_id"]),
+        state.get("stage") or "",
+        int(state.get("progress_pct") or 0),
+        text[:200],
+        event_type="thought",
+        extra=extra,
+    )
+
+
+async def publish_finding(
+    state: AgentState,
+    finding: dict,
+    node: str,
+) -> None:
+    """Emit a newly discovered finding for real-time display."""
+    extra: dict = {
+        "id": finding.get("id") or "",
+        "severity": finding.get("severity", "info"),
+        "pillar": finding.get("pillar", ""),
+        "title": finding.get("title", ""),
+        "description": finding.get("description", ""),
+        "file_path": finding.get("file_path", ""),
+        "line_start": finding.get("line_start"),
+        "line_end": finding.get("line_end"),
+        "node": node,
+    }
+    await publish_analysis_event(
+        str(state["job_id"]),
+        str(state["tenant_id"]),
+        state.get("stage") or "",
+        int(state.get("progress_pct") or 0),
+        finding.get("title", ""),
+        event_type="finding",
+        extra=extra,
+    )
+
+
+async def publish_file_status(
+    state: AgentState,
+    file: str,
+    file_status: str,
+    language: str = "",
+) -> None:
+    """Emit file scanning/done/skipped status for live file queue."""
+    await publish_analysis_event(
+        str(state["job_id"]),
+        str(state["tenant_id"]),
+        state.get("stage") or "",
+        int(state.get("progress_pct") or 0),
+        f"{file}: {file_status}",
+        event_type="file_status",
+        extra={"file": file, "status": file_status, "language": language},
+    )
+
+
+async def publish_cost_update(state: AgentState) -> None:
+    """Emit current cost breakdown from token_usage."""
+    usage = state.get("token_usage") or {}
+    total = usage.get("cost_usd", 0.0)
+
+    haiku_cost = 0.0
+    sonnet_cost = 0.0
+    for _call in (state.get("_llm_cost_log") or []):
+        if "haiku" in (_call.get("model") or "").lower():
+            haiku_cost += _call.get("cost", 0.0)
+        else:
+            sonnet_cost += _call.get("cost", 0.0)
+
+    if haiku_cost == 0 and sonnet_cost == 0:
+        sonnet_cost = total
+
+    await publish_analysis_event(
+        str(state["job_id"]),
+        str(state["tenant_id"]),
+        state.get("stage") or "",
+        int(state.get("progress_pct") or 0),
+        f"Cost: ${total:.3f}",
+        event_type="cost_update",
+        extra={
+            "haiku_usd": round(haiku_cost, 4),
+            "sonnet_usd": round(sonnet_cost, 4),
+            "embeddings_usd": 0.0,
+            "total_usd": round(total, 4),
+            "credits_consumed": max(1, int(total / 0.05)) if total > 0 else 0,
+        },
+    )
+
+
+async def publish_done(
+    state: AgentState,
+    score_global: int | None = None,
+) -> None:
+    """Emit terminal done event with score and redirect URL."""
+    job_id = str(state["job_id"])
+    await publish_analysis_event(
+        job_id,
+        str(state["tenant_id"]),
+        "done",
+        100,
+        "Analysis complete!",
+        event_type="done",
+        extra={
+            "analysis_id": job_id,
+            "score_global": score_global or 0,
+            "redirect_to": f"/analyses/{job_id}",
+        },
     )
 
 

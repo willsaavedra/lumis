@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import structlog
 
-from apps.agent.nodes.base import publish_progress
+from apps.agent.nodes.base import publish_progress, publish_thought
 from apps.agent.schemas import AgentState
 
 log = structlog.get_logger(__name__)
@@ -34,7 +34,7 @@ async def deduplicate_node(state: AgentState) -> dict:
     Deduplicate findings by fingerprint (keep highest severity per group)
     and suppress any that are covered by a lumis-ignore comment in the source.
     """
-    await publish_progress(state, "deduplicating", 72, "Deduplicating findings...")
+    await publish_progress(state, "deduplicating", 72, "Deduplicating findings...", stage_index=7)
 
     findings: list[dict] = list(state.get("findings", []))
     suppressed: list[dict] = state.get("suppressed", [])
@@ -84,5 +84,10 @@ async def deduplicate_node(state: AgentState) -> dict:
         merged=dedup_count,
         job_id=state.get("job_id"),
     )
-    await publish_progress(state, "deduplicating", 73, f"Deduplicated to {len(deduped)} findings.")
+    await publish_thought(
+        state, "deduplicate",
+        f"Merged {dedup_count} duplicates — {len(deduped)} unique findings remain",
+        status="done",
+    )
+    await publish_progress(state, "deduplicating", 73, f"Deduplicated to {len(deduped)} findings.", stage_index=7)
     return {"findings": deduped}

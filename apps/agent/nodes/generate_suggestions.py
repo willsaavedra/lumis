@@ -5,7 +5,7 @@ import json
 import time
 import structlog
 
-from apps.agent.nodes.base import publish_progress, publish_llm_call_started, log_llm_call
+from apps.agent.nodes.base import publish_progress, publish_llm_call_started, log_llm_call, publish_thought, publish_cost_update
 from apps.agent.nodes.instrumentation_hints import constraint_section
 from apps.agent.schemas import AgentState
 
@@ -33,7 +33,7 @@ async def generate_suggestions_node(state: AgentState) -> dict:
     analysis_type = state.get("request", {}).get("analysis_type", "full")
     cap = _SUGGESTION_CAPS.get(analysis_type, 10)
 
-    await publish_progress(state, "generating", 82, "Generating code suggestions...")
+    await publish_progress(state, "generating", 82, "Generating code suggestions...", stage_index=8)
 
     findings = state.get("findings", [])
 
@@ -93,7 +93,13 @@ async def generate_suggestions_node(state: AgentState) -> dict:
         except Exception as e:
             log.warning("suggestion_generation_failed", error=str(e))
 
-    await publish_progress(state, "generating", 88, "Code suggestions generated.")
+    await publish_thought(
+        state, "generate_suggestions",
+        f"Generated code fix suggestions for {min(len(actionable), cap)} finding(s)",
+        status="done",
+    )
+    await publish_cost_update(state)
+    await publish_progress(state, "generating", 88, "Code suggestions generated.", stage_index=8)
     return {"findings": updated_findings}
 
 

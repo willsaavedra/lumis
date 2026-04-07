@@ -441,16 +441,25 @@ async def stream_analysis_progress(job_id: str, current: CurrentUser) -> Streami
     ) -> AsyncGenerator[str, None]:
         from apps.api.core.redis_client import get_redis
 
+        def _sse_frame(raw_json: str) -> str:
+            """Build SSE frame with event type prefix when available."""
+            try:
+                obj = json.loads(raw_json)
+                etype = obj.get("event_type", "progress")
+            except Exception:
+                etype = "progress"
+            return f"event: {etype}\ndata: {raw_json}\n\n"
+
         redis = get_redis()
         channel = f"t:{tenant_id}:analysis:{job_id}:progress"
         try:
             history = await redis.lrange(tk, 0, -1)
             terminal_seen = False
             for raw in history:
-                yield f"data: {raw}\n\n"
+                yield _sse_frame(raw)
                 try:
                     ev = json.loads(raw)
-                    if ev.get("stage") in ("done", "failed"):
+                    if ev.get("stage") in ("done", "failed") or ev.get("event_type") == "done":
                         terminal_seen = True
                 except Exception:
                     pass
@@ -459,7 +468,7 @@ async def stream_analysis_progress(job_id: str, current: CurrentUser) -> Streami
                 return
 
             if terminal_fallback and not history:
-                yield f"data: {json.dumps(terminal_fallback)}\n\n"
+                yield _sse_frame(json.dumps(terminal_fallback))
                 return
 
             pubsub = redis.pubsub()
@@ -470,10 +479,10 @@ async def stream_analysis_progress(job_id: str, current: CurrentUser) -> Streami
                     if message and message.get("data") is not None:
                         raw = message["data"]
                         data = raw.decode("utf-8") if isinstance(raw, bytes) else raw
-                        yield f"data: {data}\n\n"
+                        yield _sse_frame(data)
                         try:
                             parsed = json.loads(data)
-                            if parsed.get("stage") in ("done", "failed"):
+                            if parsed.get("stage") in ("done", "failed") or parsed.get("event_type") == "done":
                                 break
                         except Exception:
                             pass
@@ -486,11 +495,14 @@ async def stream_analysis_progress(job_id: str, current: CurrentUser) -> Streami
 
     if job.status == "completed":
         fallback = {
-            "event_type": "step",
+            "event_type": "done",
             "stage": "done",
             "progress_pct": 100,
             "message": "Analysis complete.",
             "timestamp": ts,
+            "analysis_id": job_id,
+            "score_global": job.result.score_global if hasattr(job, "result") and job.result else 0,
+            "redirect_to": f"/analyses/{job_id}",
         }
         return StreamingResponse(
             replay_then_live(terminal_fallback=fallback),
@@ -499,7 +511,7 @@ async def stream_analysis_progress(job_id: str, current: CurrentUser) -> Streami
 
     if job.status == "failed":
         fallback = {
-            "event_type": "step",
+            "event_type": "error",
             "stage": "failed",
             "progress_pct": 0,
             "message": (job.error_message or "Analysis failed.")[:2000],

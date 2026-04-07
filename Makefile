@@ -2,6 +2,9 @@
         shell-api shell-db migrate migration seed test test-api test-agent \
         analyze k8s-deploy k8s-logs clean stripe-listen stripe-fixture
 
+# Celery worker container count (horizontal scale). Example: `make up WORKER_REPLICAS=3`
+WORKER_REPLICAS ?= 1
+
 # ── Development ─────────────────────────────────────────────────────────────
 
 dev-up: build up wait-healthy migrate seed
@@ -13,7 +16,7 @@ dev-up: build up wait-healthy migrate seed
 	@echo "  Frontend: horion-frontend repo (Vercel)"
 
 up:
-	docker compose up -d
+	docker compose up -d --scale worker=$(WORKER_REPLICAS)
 
 down:
 	docker compose down

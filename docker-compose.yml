@@ -66,6 +66,9 @@ services:
       redis:
         condition: service_healthy
 
+  # Celery workers: horizontais com `docker compose up -d --scale worker=N` ou `make up WORKER_REPLICAS=N`.
+  # Este serviço não publica porta no host — várias réplicas na mesma VM são seguras.
+  # api/agent têm `ports:` fixos (8000/8001); para mais de uma instância na mesma máquina é preciso balanceador + remover o mapeamento direto ou usar Swarm/K8s.
   worker:
     build:
       context: .

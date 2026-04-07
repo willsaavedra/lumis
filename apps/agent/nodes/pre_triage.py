@@ -6,7 +6,7 @@ import re
 
 import structlog
 
-from apps.agent.nodes.base import publish_progress
+from apps.agent.nodes.base import publish_progress, publish_thought, publish_file_status
 from apps.agent.schemas import AgentState, ChangedFile
 
 log = structlog.get_logger(__name__)
@@ -186,7 +186,7 @@ async def pre_triage_node(state: AgentState) -> dict:
       - full:       whole repo (or optional path scope), LLM classification for ambiguous files
       - repository: prioritized deep walk (src/, cmd/, … first), then rest; LLM classification
     """
-    await publish_progress(state, "triaging", 15, "Classifying changed files...")
+    await publish_progress(state, "triaging", 15, "Classifying changed files...", stage_index=2)
 
     request = state["request"]
     analysis_type = request.get("analysis_type", "full")
@@ -309,7 +309,20 @@ async def pre_triage_node(state: AgentState) -> dict:
         relevant=relevant_count,
         job_id=state["job_id"],
     )
-    await publish_progress(state, "triaging", 20, f"Found {relevant_count} relevant files.")
+
+    for f in classified:
+        if f["relevance_score"] >= min_score and f.get("content"):
+            await publish_file_status(state, f["path"], "pending", f.get("language") or "")
+
+    await publish_thought(
+        state, "pre_triage",
+        f"Classified {len(classified)} files — {relevant_count} relevant for analysis",
+        status="done",
+    )
+    await publish_progress(
+        state, "triaging", 20, f"Found {relevant_count} relevant files.",
+        stage_index=2, files_total=relevant_count,
+    )
 
     return {"changed_files": classified, "suppressed": suppressed}
 

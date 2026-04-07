@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import structlog
 
-from apps.agent.nodes.base import publish_progress
+from apps.agent.nodes.base import publish_progress, publish_thought
 from apps.agent.schemas import AgentState
 
 log = structlog.get_logger(__name__)
@@ -14,12 +14,13 @@ async def fetch_dd_coverage_node(state: AgentState) -> dict:
     Fetch existing Datadog coverage for the service.
     Gracefully degrades if DD is not configured.
     """
-    await publish_progress(state, "fetching_dd", 40, "Checking Datadog coverage...")
+    await publish_progress(state, "fetching_dd", 40, "Checking Datadog coverage...", stage_index=4)
 
     from apps.agent.core.config import settings
     if not settings.dd_api_key or not settings.dd_app_key:
         log.info("datadog_not_configured_skipping")
-        await publish_progress(state, "fetching_dd", 45, "Datadog not configured — skipping.")
+        await publish_thought(state, "fetch_dd", "Datadog not configured — skipping coverage check", status="done")
+        await publish_progress(state, "fetching_dd", 45, "Datadog not configured — skipping.", stage_index=4)
         return {"dd_coverage": None}
 
     repo_full_name = state["request"]["repo_full_name"]

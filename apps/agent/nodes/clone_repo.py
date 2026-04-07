@@ -8,7 +8,7 @@ from pathlib import Path
 
 import structlog
 
-from apps.agent.nodes.base import publish_progress
+from apps.agent.nodes.base import publish_progress, publish_thought
 from apps.agent.schemas import AgentState
 
 log = structlog.get_logger(__name__)
@@ -19,7 +19,7 @@ async def clone_repo_node(state: AgentState) -> dict:
     job_id = state["job_id"]
     request = state["request"]
 
-    await publish_progress(state, "cloning", 5, "Cloning repository...")
+    await publish_progress(state, "cloning", 5, "Cloning repository...", stage_index=1)
 
     repo_path = Path(f"/tmp/lumis-{job_id}")
     repo_path.mkdir(parents=True, exist_ok=True)
@@ -82,7 +82,8 @@ async def clone_repo_node(state: AgentState) -> dict:
             raise RuntimeError(f"Git clone failed: {result.stderr[:500]}")
 
         log.info("repo_cloned", job_id=job_id, path=str(repo_path))
-        await publish_progress(state, "cloning", 10, "Repository cloned successfully.")
+        await publish_thought(state, "clone_repo", f"Cloned {request.get('repo_full_name', '')} @ {ref}", status="done")
+        await publish_progress(state, "cloning", 10, "Repository cloned successfully.", stage_index=1)
         return {"repo_path": str(repo_path)}
 
     except Exception as e:

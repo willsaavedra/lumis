@@ -6,7 +6,7 @@ from typing import Any
 
 import structlog
 
-from apps.agent.nodes.base import publish_progress
+from apps.agent.nodes.base import publish_progress, publish_thought
 from apps.agent.nodes.deduplicate import _fingerprint
 from apps.agent.schemas import AgentState
 
@@ -22,7 +22,7 @@ async def diff_crossrun_node(state: AgentState) -> dict:
 
     Also stores `previous_job_id` and `crossrun_summary` in state for persistence in post_report.
     """
-    await publish_progress(state, "diffing", 74, "Comparing against previous run...")
+    await publish_progress(state, "diffing", 74, "Comparing against previous run...", stage_index=7)
 
     findings: list[dict] = list(state.get("findings", []))
     request = state.get("request", {})
@@ -97,9 +97,15 @@ async def diff_crossrun_node(state: AgentState) -> dict:
         previous_job_id=previous_job_id,
         job_id=job_id,
     )
+    await publish_thought(
+        state, "diff_crossrun",
+        f"{new_count} new, {persisting_count} persisting, {resolved_count} resolved vs. previous run",
+        status="done",
+    )
     await publish_progress(
         state, "diffing", 75,
-        f"{new_count} new · {persisting_count} persisting · {resolved_count} resolved since last run."
+        f"{new_count} new · {persisting_count} persisting · {resolved_count} resolved since last run.",
+        stage_index=7,
     )
     return {
         "findings": findings,

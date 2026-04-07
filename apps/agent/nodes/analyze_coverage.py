@@ -7,7 +7,10 @@ import re
 import time
 import structlog
 
-from apps.agent.nodes.base import publish_progress, publish_llm_call_started, log_llm_call
+from apps.agent.nodes.base import (
+    publish_progress, publish_llm_call_started, log_llm_call,
+    publish_thought, publish_finding, publish_file_status, publish_cost_update,
+)
 from apps.agent.nodes.instrumentation_hints import (
     constraint_section,
     add_instrumentation_suggestion,
@@ -471,7 +474,7 @@ async def analyze_coverage_node(state: AgentState) -> dict:
     analysis_type = state.get("request", {}).get("analysis_type", "full")
     cfg = _COVERAGE_CONFIG.get(analysis_type, _COVERAGE_CONFIG["full"])
 
-    await publish_progress(state, "analyzing", 50, "Analyzing observability coverage...")
+    await publish_progress(state, "analyzing", 50, "Analyzing observability coverage...", stage_index=5)
 
     call_graph = state.get("call_graph") or {}
     nodes = call_graph.get("nodes", {})
@@ -655,7 +658,12 @@ async def analyze_coverage_node(state: AgentState) -> dict:
         else:
             batches = [capped]
 
+        files_done = 0
         for batch_idx, batch in enumerate(batches):
+            batch_paths = [b["path"] for b in batch]
+            for b in batch:
+                await publish_file_status(state, b["path"], "scanning", b.get("language") or "")
+
             try:
                 llm_findings = await _llm_analyze_coverage(
                     batch,
@@ -671,6 +679,7 @@ async def analyze_coverage_node(state: AgentState) -> dict:
                     if f.get("confidence", "medium") != "low":
                         findings.append(f)
                         accepted += 1
+                        await publish_finding(state, f, "analyze_coverage")
                         log.debug(
                             "finding_accepted",
                             file=f.get("file_path"),
@@ -688,6 +697,26 @@ async def analyze_coverage_node(state: AgentState) -> dict:
                             reason="low_confidence",
                             job_id=state.get("job_id"),
                         )
+
+                files_done += len(batch)
+                for b in batch:
+                    await publish_file_status(state, b["path"], "done", b.get("language") or "")
+
+                pct = 50 + int((files_done / len(capped)) * 10) if capped else 55
+                await publish_progress(
+                    state, "analyzing", min(pct, 59),
+                    f"Batch {batch_idx + 1}/{len(batches)} — {accepted} findings",
+                    stage_index=5, files_analyzed=files_done, files_total=len(capped),
+                    current_file=batch_paths[-1] if batch_paths else None,
+                )
+                await publish_thought(
+                    state, "analyze_coverage",
+                    f"Analyzed batch {batch_idx + 1} ({len(batch)} files): {accepted} findings accepted, {rejected} filtered",
+                    status="active" if batch_idx < len(batches) - 1 else "done",
+                    files=batch_paths,
+                )
+                await publish_cost_update(state)
+
                 log.info(
                     "coverage_batch_result",
                     batch_index=batch_idx,
@@ -697,9 +726,15 @@ async def analyze_coverage_node(state: AgentState) -> dict:
                     job_id=state.get("job_id"),
                 )
             except Exception as e:
+                files_done += len(batch)
+                for b in batch:
+                    await publish_file_status(state, b["path"], "done", b.get("language") or "")
                 log.warning("llm_coverage_analysis_failed", error=str(e), batch_size=len(batch))
 
-    await publish_progress(state, "analyzing", 60, f"Found {len(findings)} initial findings.")
+    await publish_progress(
+        state, "analyzing", 60, f"Found {len(findings)} initial findings.",
+        stage_index=5, files_analyzed=len(relevant_files[:file_limit]),
+    )
     return {"findings": findings, "coverage_map": coverage_map}
 
 

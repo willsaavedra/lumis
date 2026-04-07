@@ -14,7 +14,7 @@ import asyncio
 
 import structlog
 
-from apps.agent.nodes.base import publish_progress
+from apps.agent.nodes.base import publish_progress, publish_thought
 from apps.agent.schemas import AgentState
 
 log = structlog.get_logger(__name__)
@@ -36,7 +36,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
     Build semantic queries from the current analysis context, retrieve relevant
     knowledge chunks from the global + tenant indexes, and store them in state.
     """
-    await publish_progress(state, "retrieving", 38, "Retrieving knowledge base context...")
+    await publish_progress(state, "retrieving", 38, "Retrieving knowledge base context...", stage_index=4)
 
     from apps.api.core.config import settings
 
@@ -57,7 +57,10 @@ async def retrieve_context_node(state: AgentState) -> dict:
             chars=len(rag_context),
             job_id=state.get("job_id"),
         )
-    await publish_progress(state, "retrieving", 42, "Knowledge context ready.")
+        await publish_thought(state, "retrieve_context", f"Retrieved {len(rag_context)} chars of knowledge base context", status="done")
+    else:
+        await publish_thought(state, "retrieve_context", "No relevant knowledge base context found", status="done")
+    await publish_progress(state, "retrieving", 42, "Knowledge context ready.", stage_index=4)
     return {"rag_context": rag_context}
 
 

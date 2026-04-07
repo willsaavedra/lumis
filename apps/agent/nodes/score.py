@@ -8,7 +8,7 @@ from pathlib import Path
 
 import structlog
 
-from apps.agent.nodes.base import publish_progress
+from apps.agent.nodes.base import publish_progress, publish_thought
 from apps.agent.schemas import AgentState
 
 log = structlog.get_logger(__name__)
@@ -131,7 +131,7 @@ def _detect_instrumentation(state: AgentState) -> dict:
 
 async def score_node(state: AgentState) -> dict:
     """Calculate observability scores (0-100) for each pillar."""
-    await publish_progress(state, "scoring", 75, "Calculating scores...")
+    await publish_progress(state, "scoring", 75, "Calculating scores...", stage_index=8)
 
     findings = state.get("findings", [])
 
@@ -218,7 +218,12 @@ async def score_node(state: AgentState) -> dict:
     }
 
     log.info("scores_calculated", global_score=global_score, scores=scores)
-    await publish_progress(state, "scoring", 80, f"Global score: {global_score}/100")
+    await publish_thought(
+        state, "score",
+        f"Global score: {global_score}/100 — Metrics: {metrics_score}, Logs: {logs_score}, Traces: {traces_score}",
+        status="done",
+    )
+    await publish_progress(state, "scoring", 80, f"Global score: {global_score}/100", stage_index=8)
     return {"efficiency_scores": scores}
 
 

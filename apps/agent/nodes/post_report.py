@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import structlog
 
-from apps.agent.nodes.base import publish_progress
+from apps.agent.nodes.base import publish_progress, publish_thought, publish_cost_update, publish_done
 from apps.agent.nodes.finding_snippets import enrich_findings_code_snippets
 from apps.agent.schemas import AgentState
 
@@ -16,7 +16,7 @@ log = structlog.get_logger(__name__)
 
 async def post_report_node(state: AgentState) -> dict:
     """Save analysis results to DB and post PR comment."""
-    await publish_progress(state, "posting", 90, "Saving results...")
+    await publish_progress(state, "posting", 90, "Saving results...", stage_index=9)
 
     job_id = state["job_id"]
     tenant_id = state["tenant_id"]
@@ -52,7 +52,14 @@ async def post_report_node(state: AgentState) -> dict:
         shutil.rmtree(state["repo_path"], ignore_errors=True)
         log.info("repo_cleaned_up", path=state["repo_path"])
 
-    await publish_progress(state, "done", 100, "Analysis complete!")
+    score_global = scores.get("global_score")
+    await publish_thought(
+        state, "post_report",
+        f"Results saved — {len(findings)} findings, global score {score_global}/100",
+        status="done",
+    )
+    await publish_cost_update(state)
+    await publish_done(state, score_global=score_global)
     return {"stage": "done", "progress_pct": 100}
 
 

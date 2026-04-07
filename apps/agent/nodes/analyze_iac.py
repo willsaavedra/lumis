@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 import structlog
 
-from apps.agent.nodes.base import publish_progress
+from apps.agent.nodes.base import publish_progress, publish_thought
 from apps.agent.schemas import AgentState
 
 log = structlog.get_logger(__name__)
@@ -266,7 +266,7 @@ async def analyze_iac_node(state: AgentState) -> dict:
       - Terraform (.tf / .hcl): SQS, Lambda, RDS, ECS, resource tags
       - Helm templates: Datadog annotations, readinessProbe, PDB
     """
-    await publish_progress(state, "analyzing", 52, "Analyzing IaC for observability gaps...")
+    await publish_progress(state, "analyzing", 52, "Analyzing IaC for observability gaps...", stage_index=5)
 
     changed_files = state.get("changed_files", [])
     findings: list[dict] = list(state.get("findings", []))
@@ -285,7 +285,8 @@ async def analyze_iac_node(state: AgentState) -> dict:
         log.info("iac_helm_analyzed", files=len(helm_files), findings=len(helm_findings))
 
     total = len(tf_files) + len(helm_files)
-    await publish_progress(state, "analyzing", 56, f"IaC analysis complete: {total} files scanned.")
+    await publish_thought(state, "analyze_iac", f"Scanned {total} IaC files — {len(findings)} findings", status="done")
+    await publish_progress(state, "analyzing", 56, f"IaC analysis complete: {total} files scanned.", stage_index=5)
     return {"findings": findings}
 
 
