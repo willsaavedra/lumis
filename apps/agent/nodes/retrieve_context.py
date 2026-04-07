@@ -101,7 +101,8 @@ async def _retrieve(state: AgentState) -> str | None:
 def _build_queries(state: AgentState) -> list[str]:
     """
     Build semantic queries from the analysis context.
-    3 query types: language+pattern, tenant standards, file history.
+    Query types: language+pattern, tenant standards, file triage (when files in scope),
+    file-specific history.
     """
     queries: list[str] = []
     lang = _primary_language(state)
@@ -126,8 +127,15 @@ def _build_queries(state: AgentState) -> list[str]:
         queries.append(f"naming convention metrics required tags tenant standards")
         queries.append(f"approved sdk version log library required log fields")
 
-    # 3. File-specific history for changed files
+    # 3. File triage / relevance (matches global chunks from file_triage_guide.md)
     changed_files = state.get("changed_files", [])
+    if changed_files:
+        queries.append(
+            "file relevance triage observability analysis which source files to prioritize "
+            "application code vs tests vs configuration"
+        )
+
+    # 4. File-specific history for changed files
     high_relevance = [f for f in changed_files if f.get("relevance_score", 0) >= 2][:3]
     for f in high_relevance:
         file_path = f.get("path", "")

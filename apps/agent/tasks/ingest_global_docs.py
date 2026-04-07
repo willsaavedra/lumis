@@ -5,7 +5,8 @@ Runs every Monday at 02:00 UTC. Downloads OTel semantic conventions + SDK docs
 and Datadog integration guides, chunks them, embeds via OpenAI, and upserts
 into knowledge_chunks with tenant_id=NULL (shared by all tenants).
 
-Also ingests curated static knowledge from workshop materials and internal docs.
+Also ingests curated static knowledge from workshop materials and internal docs
+(e.g. otel_auto_vs_manual_instrumentation.md, file_triage_guide.md).
 """
 from __future__ import annotations
 
@@ -588,6 +589,11 @@ connected view of the transaction.
         "otel-auto-vs-manual-instrumentation",
         "traces",
         _load_static_knowledge_md("otel_auto_vs_manual_instrumentation.md"),
+    ),
+    (
+        "file-triage-guide",
+        "coverage",
+        _load_static_knowledge_md("file_triage_guide.md"),
     ),
 ]
 
