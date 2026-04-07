@@ -33,10 +33,16 @@ async def diff_crossrun_node(state: AgentState) -> dict:
     prev_findings: list[dict] = []
     previous_score_global: int | None = None
 
+    analysis_type = request.get("analysis_type")
+    changed_files = list(request.get("changed_files") or [])
+
     if repo_id:
         try:
             previous_job_id, prev_findings, previous_score_global = await _load_previous_run_data(
-                repo_id=repo_id, current_job_id=job_id
+                repo_id=repo_id,
+                current_job_id=job_id,
+                analysis_type=analysis_type,
+                changed_files=changed_files,
             )
         except Exception as exc:
             log.warning("diff_crossrun_lookup_failed", error=str(exc))
@@ -79,13 +85,22 @@ async def diff_crossrun_node(state: AgentState) -> dict:
 
     resolved_count = len(resolved_items)
 
+    current_score_global = state.get("scores", {}).get("global") if state.get("scores") else None
+
     crossrun_summary: dict[str, Any] = {
         "previous_job_id": previous_job_id,
         "previous_score_global": previous_score_global,
+        "score_delta": (
+            (current_score_global - previous_score_global)
+            if current_score_global is not None and previous_score_global is not None
+            else None
+        ),
         "new_count": new_count,
         "persisting_count": persisting_count,
         "resolved_count": resolved_count,
         "resolved": resolved_items,
+        "scope_aware": True,
+        "compared_analysis_type": analysis_type,
     }
 
     log.info(
@@ -117,30 +132,64 @@ async def diff_crossrun_node(state: AgentState) -> dict:
 async def _load_previous_run_data(
     repo_id: str,
     current_job_id: str | None,
+    analysis_type: str | None = None,
+    changed_files: list[str] | None = None,
 ) -> tuple[str | None, list[dict], int | None]:
     """
-    Latest completed AnalysisJob for this repo (excluding current), its findings JSON, and global score.
+    Latest completed AnalysisJob for this repo (excluding current), its findings
+    JSON, and global score.
+
+    Scope-aware: scoped (quick) runs match the most recent completed quick run
+    with overlapping paths; full/repository runs match only other full/repository
+    runs.  Falls back to same-analysis_type if no path overlap is found.
     """
     from sqlalchemy import select, and_
 
     from apps.api.core.database import AsyncSessionFactory
     from apps.api.models.analysis import AnalysisJob, AnalysisResult
 
+    base_conditions = [
+        AnalysisJob.repo_id == uuid.UUID(repo_id),
+        AnalysisJob.status == "completed",
+    ]
+    if current_job_id:
+        base_conditions.append(AnalysisJob.id != uuid.UUID(current_job_id))
+
     async with AsyncSessionFactory() as session:
-        query = (
-            select(AnalysisJob)
-            .where(
-                and_(
-                    AnalysisJob.repo_id == uuid.UUID(repo_id),
-                    AnalysisJob.status == "completed",
-                    AnalysisJob.id != uuid.UUID(current_job_id) if current_job_id else True,
-                )
+        prev_job = None
+
+        if analysis_type == "quick" and changed_files:
+            scope_set = set(changed_files)
+            candidates_q = (
+                select(AnalysisJob)
+                .where(and_(*base_conditions, AnalysisJob.analysis_type == "quick"))
+                .order_by(AnalysisJob.completed_at.desc())
+                .limit(20)
             )
-            .order_by(AnalysisJob.completed_at.desc())
-            .limit(1)
-        )
-        job_result = await session.execute(query)
-        prev_job = job_result.scalar_one_or_none()
+            cand_result = await session.execute(candidates_q)
+            for cand in cand_result.scalars():
+                cand_files = set(
+                    (cand.changed_files or {}).get("files", [])
+                    if isinstance(cand.changed_files, dict) else []
+                )
+                if cand_files & scope_set:
+                    prev_job = cand
+                    break
+
+        if not prev_job and analysis_type:
+            type_filter = (
+                AnalysisJob.analysis_type.in_(["full", "repository"])
+                if analysis_type in ("full", "repository")
+                else AnalysisJob.analysis_type == analysis_type
+            )
+            q = (
+                select(AnalysisJob)
+                .where(and_(*base_conditions, type_filter))
+                .order_by(AnalysisJob.completed_at.desc())
+                .limit(1)
+            )
+            res = await session.execute(q)
+            prev_job = res.scalar_one_or_none()
 
         if not prev_job:
             return None, [], None
