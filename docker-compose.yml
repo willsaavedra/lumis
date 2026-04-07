@@ -20,6 +20,8 @@ services:
       - DOMAIN=${DOMAIN}
       - CERTBOT_EMAIL=${CERTBOT_EMAIL}
       - CERTBOT_STAGING=${CERTBOT_STAGING:-false}
+    env_file:
+      - .env.local
     volumes:
       - letsencrypt:/etc/letsencrypt   # cert + account data (persisted)
       - certbot_webroot:/var/www/certbot  # ACME challenge files
