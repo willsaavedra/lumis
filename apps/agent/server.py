@@ -15,7 +15,7 @@ from typing import Any
 
 import structlog
 from fastapi import FastAPI, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 log = structlog.get_logger(__name__)
@@ -57,7 +57,7 @@ class EmitEventRequest(BaseModel):
 
 
 @app.post("/events/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def emit_event(job_id: str, body: EmitEventRequest) -> None:
+async def emit_event(job_id: str, body: EmitEventRequest) -> Response:
     """
     Emit a progress event for a job.
     Called by any service (worker, API) that needs to publish a status update
@@ -81,3 +81,4 @@ async def emit_event(job_id: str, body: EmitEventRequest) -> None:
     except Exception as exc:
         log.error("emit_event_failed", job_id=job_id, error=str(exc))
         raise HTTPException(status_code=500, detail="Failed to emit event") from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
