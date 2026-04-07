@@ -16,13 +16,21 @@ log = structlog.get_logger(__name__)
 _ANALYSIS_WAIT_TIMEOUT_SEC = float(os.environ.get("ANALYSIS_AGENT_WAIT_TIMEOUT_SEC", "1800"))
 
 
-@celery_app.task(bind=True, name="apps.worker.tasks.run_analysis", max_retries=2)
+@celery_app.task(
+    bind=True,
+    name="apps.worker.tasks.run_analysis",
+    max_retries=2,
+    soft_time_limit=2400,   # 40 minutes: raise SoftTimeLimitExceeded
+    time_limit=2700,         # 45 minutes: SIGKILL hard stop
+)
 def run_analysis(self, job_id: str, reservation_token: str) -> dict:
     """
     Enqueues analysis on the Lumis Agent HTTP service and waits until the job
     finishes in the database (completed / failed). The graph runs in the agent process.
     """
     log.info("analysis_task_started", job_id=job_id)
+
+    from billiard.exceptions import SoftTimeLimitExceeded
 
     async def _run():
         try:
@@ -48,7 +56,14 @@ def run_analysis(self, job_id: str, reservation_token: str) -> dict:
         await _release_credits(reservation_token, job_id)
         raise TimeoutError(f"Analysis did not complete within {_ANALYSIS_WAIT_TIMEOUT_SEC}s")
 
-    return asyncio.run(_run())
+    try:
+        return asyncio.run(_run())
+    except SoftTimeLimitExceeded:
+        log.error("analysis_task_timeout", job_id=job_id, soft_limit_sec=2400)
+        asyncio.run(_publish_analysis_failed_redis(job_id, "Analysis timed out (worker soft limit)"))
+        asyncio.run(_maybe_mark_job_failed_if_running(job_id, "Analysis timed out (worker soft limit)"))
+        asyncio.run(_release_credits(reservation_token, job_id))
+        raise
 
 
 @celery_app.task(
