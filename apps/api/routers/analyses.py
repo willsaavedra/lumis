@@ -146,6 +146,7 @@ class AnalysisJobResponse(BaseModel):
     credits_consumed: int | None
     score_global: int | None
     created_at: str
+    started_at: str | None = None
     completed_at: str | None
     fix_pr_url: str | None = None
     fix_pr_pending: bool = False
@@ -204,6 +205,53 @@ async def trigger_analysis(body: TriggerAnalysisRequest, current: CurrentUser) -
         )
         job = loaded.scalar_one()
     return _job_to_response(job)
+
+
+@router.post("/{job_id}/cancel", status_code=status.HTTP_200_OK)
+async def cancel_analysis(job_id: str, current: CurrentUser) -> dict:
+    """Cancel a running or pending analysis."""
+    user, tenant_id, _ = current
+    import redis.asyncio as aioredis
+    from apps.api.core.config import settings as app_settings
+
+    async with get_session_with_tenant(tenant_id) as session:
+        result = await session.execute(
+            select(AnalysisJob).where(
+                AnalysisJob.id == uuid.UUID(job_id),
+                AnalysisJob.tenant_id == uuid.UUID(tenant_id),
+            )
+        )
+        job = result.scalar_one_or_none()
+        if not job:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        if job.status not in ("pending", "running"):
+            raise HTTPException(status_code=409, detail=f"Cannot cancel analysis in '{job.status}' state")
+
+        job.status = "failed"
+        job.error_message = "Cancelled by user"
+        job.completed_at = datetime.now(timezone.utc)
+
+    # Publish SSE error event so the live page reacts immediately
+    try:
+        event_obj = json.dumps({
+            "event_type": "error",
+            "message": "Analysis cancelled by user",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }, ensure_ascii=False)
+        channel = f"t:{tenant_id}:analysis:{job_id}:progress"
+        timeline_key = f"t:{tenant_id}:analysis:{job_id}:timeline"
+        r = aioredis.from_url(app_settings.redis_url, decode_responses=True)
+        try:
+            await r.publish(channel, f"event: error\ndata: {event_obj}\n\n")
+            await r.rpush(timeline_key, event_obj)
+            await r.expire(timeline_key, 604800)
+        finally:
+            await r.aclose()
+    except Exception as exc:
+        log.warning("cancel_publish_failed", job_id=job_id, error=str(exc))
+
+    log.info("analysis_cancelled", job_id=job_id, user=str(user.id))
+    return {"status": "cancelled", "job_id": job_id}
 
 
 def _apply_analysis_list_filters(
@@ -589,6 +637,7 @@ def _job_to_response(job: AnalysisJob) -> AnalysisJobResponse:
         credits_consumed=job.credits_consumed,
         score_global=score,
         created_at=job.created_at.isoformat(),
+        started_at=job.started_at.isoformat() if job.started_at else None,
         completed_at=job.completed_at.isoformat() if job.completed_at else None,
         fix_pr_url=job.fix_pr_url,
         fix_pr_pending=_fix_pr_pending(job),
