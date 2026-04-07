@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -11,41 +13,57 @@ from apps.worker.celery_app import celery_app
 
 log = structlog.get_logger(__name__)
 
+_ANALYSIS_WAIT_TIMEOUT_SEC = float(os.environ.get("ANALYSIS_AGENT_WAIT_TIMEOUT_SEC", "1800"))
+
 
 @celery_app.task(bind=True, name="apps.worker.tasks.run_analysis", max_retries=2)
 def run_analysis(self, job_id: str, reservation_token: str) -> dict:
     """
-    Main analysis task. Calls the LangGraph agent asynchronously.
-    All async work runs in a single event loop to avoid Redis loop conflicts.
+    Enqueues analysis on the Lumis Agent HTTP service and waits until the job
+    finishes in the database (completed / failed). The graph runs in the agent process.
     """
     log.info("analysis_task_started", job_id=job_id)
 
     async def _run():
         try:
             await _update_job_status(job_id, "running")
-
-            from apps.agent.graph import run_analysis_graph
-            await run_analysis_graph(job_id)
-
-            await _update_job_status(job_id, "completed")
-            await _consume_credits(job_id, reservation_token)
-
-            log.info("analysis_task_completed", job_id=job_id)
-            return {"status": "completed", "job_id": job_id}
-
+            await _trigger_agent_analysis(job_id)
+            terminal = await _poll_job_until_terminal(job_id, timeout_sec=_ANALYSIS_WAIT_TIMEOUT_SEC)
         except Exception as e:
             log.error("analysis_task_failed", job_id=job_id, error=str(e))
             await _publish_analysis_failed_redis(job_id, str(e))
-            await _update_job_status(job_id, "failed", str(e))
+            await _maybe_mark_job_failed_if_running(job_id, str(e))
             await _release_credits(reservation_token, job_id)
             raise
+
+        if terminal == "completed":
+            await _consume_credits(job_id, reservation_token)
+            log.info("analysis_task_completed", job_id=job_id)
+            return {"status": "completed", "job_id": job_id}
+        if terminal == "failed":
+            await _release_credits(reservation_token, job_id)
+            raise RuntimeError("Analysis failed — see job error_message")
+
+        await _update_job_status(job_id, "failed", "Analysis timed out waiting for agent")
+        await _release_credits(reservation_token, job_id)
+        raise TimeoutError(f"Analysis did not complete within {_ANALYSIS_WAIT_TIMEOUT_SEC}s")
 
     return asyncio.run(_run())
 
 
-@celery_app.task(bind=True, name="apps.worker.tasks.create_fix_pr", max_retries=1)
+@celery_app.task(
+    bind=True,
+    name="apps.worker.tasks.create_fix_pr",
+    max_retries=1,
+    # Fix PR clones the repo, calls the LLM per-file (≤120 s each), pushes a branch,
+    # and opens a GitHub PR — well above the 10-minute global default.
+    soft_time_limit=1800,   # 30 minutes: raise SoftTimeLimitExceeded
+    time_limit=2100,         # 35 minutes: SIGKILL hard stop
+)
 def create_fix_pr(self, job_id: str) -> dict:
     """Generate code fixes with Claude and open a GitHub PR."""
+    from billiard.exceptions import SoftTimeLimitExceeded
+
     log.info("fix_pr_task_started", job_id=job_id)
 
     async def _run():
@@ -59,7 +77,14 @@ def create_fix_pr(self, job_id: str) -> dict:
             await _clear_fix_pr_enqueue(job_id)
             raise
 
-    return asyncio.run(_run())
+    try:
+        return asyncio.run(_run())
+    except SoftTimeLimitExceeded:
+        # Signal fires inside the asyncio selector — it escapes asyncio.run() without
+        # going through the inner except block, so we must clean up here.
+        log.error("fix_pr_task_timeout", job_id=job_id, soft_limit_sec=1800)
+        asyncio.run(_clear_fix_pr_enqueue(job_id))
+        raise
 
 
 @celery_app.task(bind=True, name="apps.worker.tasks.scan_repo_context", max_retries=1)
@@ -235,12 +260,71 @@ async def _db_session():
             raise
 
 
+async def _trigger_agent_analysis(job_id: str) -> None:
+    """POST /analyze/{job_id} on the Lumis Agent service (graph runs there)."""
+    import httpx
+    from apps.api.core.config import settings
+
+    url = f"{settings.agent_base_url.rstrip('/')}/analyze/{job_id}"
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(url)
+        resp.raise_for_status()
+
+
+async def _poll_job_until_terminal(job_id: str, *, timeout_sec: float) -> str | None:
+    """Return 'completed', 'failed', or None on timeout."""
+    from sqlalchemy import select
+
+    from apps.api.core.database import AsyncSessionFactory
+    from apps.api.models.analysis import AnalysisJob
+
+    deadline = time.monotonic() + timeout_sec
+    jid = uuid.UUID(job_id)
+    while time.monotonic() < deadline:
+        async with AsyncSessionFactory() as session:
+            result = await session.execute(select(AnalysisJob.status).where(AnalysisJob.id == jid))
+            st = result.scalar_one_or_none()
+        if st in ("completed", "failed"):
+            return st
+        await asyncio.sleep(2.0)
+    return None
+
+
+async def _maybe_mark_job_failed_if_running(job_id: str, err: str) -> None:
+    """If HTTP trigger failed early, job may still be 'running' — mark failed for UX."""
+    from sqlalchemy import select
+
+    from apps.api.core.database import AsyncSessionFactory
+    from apps.api.models.analysis import AnalysisJob
+
+    msg = (err or "Analysis failed.")[:2000]
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(select(AnalysisJob).where(AnalysisJob.id == uuid.UUID(job_id)))
+        job = result.scalar_one_or_none()
+        if job and job.status == "running":
+            job.status = "failed"
+            job.error_message = msg
+            job.completed_at = datetime.now(timezone.utc)
+        await session.commit()
+
+
 async def _publish_analysis_failed_redis(job_id: str, error_message: str) -> None:
-    """Notify SSE subscribers that the analysis failed (worker catch path)."""
-    from apps.agent.nodes.base import publish_analysis_event
+    """Notify SSE subscribers that the analysis failed (worker catch path).
+
+    Publishes directly to Redis — does NOT import from apps.agent to keep
+    the worker process fully decoupled from the agent package.
+    Any communication with the agent must go through the agent HTTP API.
+    """
+    import json
+
+    import redis.asyncio as aioredis
+
+    from apps.api.core.config import settings
     from apps.api.core.database import AsyncSessionFactory
     from apps.api.models.analysis import AnalysisJob
     from sqlalchemy import select
+
+    _TIMELINE_TTL_SEC = 604800  # 7 days — same as agent's base.py
 
     try:
         async with AsyncSessionFactory() as session:
@@ -248,8 +332,28 @@ async def _publish_analysis_failed_redis(job_id: str, error_message: str) -> Non
             job = result.scalar_one_or_none()
         if not job:
             return
+
         msg = (error_message or "Analysis failed.")[:2000]
-        await publish_analysis_event(job_id, str(job.tenant_id), "failed", 0, msg)
+        tenant_id = str(job.tenant_id)
+
+        event_obj = {
+            "event_type": "step",
+            "stage": "failed",
+            "progress_pct": 0,
+            "message": msg,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        event = json.dumps(event_obj, ensure_ascii=False)
+        channel = f"t:{tenant_id}:analysis:{job_id}:progress"
+        timeline_key = f"t:{tenant_id}:analysis:{job_id}:timeline"
+
+        r = aioredis.from_url(settings.redis_url, decode_responses=True)
+        try:
+            await r.publish(channel, event)
+            await r.rpush(timeline_key, event)
+            await r.expire(timeline_key, _TIMELINE_TTL_SEC)
+        finally:
+            await r.aclose()
     except Exception as ex:
         log.warning("publish_analysis_failed_redis_failed", job_id=job_id, error=str(ex))
 

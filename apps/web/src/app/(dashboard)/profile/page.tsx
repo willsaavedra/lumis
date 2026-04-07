@@ -21,87 +21,216 @@ export default function ProfilePage() {
   })
 
   return (
-    <div className="p-8 max-w-3xl">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Profile</h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', background: 'var(--hz-bg)' }}>
+      <div style={{ padding: '18px 24px 16px', borderBottom: '1px solid var(--hz-rule)' }}>
+        <h1 className="hz-h2" style={{ margin: 0, color: 'var(--hz-ink)' }}>Profile</h1>
+        <p className="hz-body" style={{ marginTop: '6px', marginBottom: 0, fontSize: '12px', color: 'var(--hz-muted)' }}>
           Your account and organization details
         </p>
       </div>
 
-      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <div className="p-6 border-b border-gray-200 dark:border-gray-800 flex items-center gap-4">
-          <div className="h-16 w-16 rounded-full bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-600 flex items-center justify-center">
-            <UserCircle className="h-9 w-9 text-gray-600 dark:text-gray-300" strokeWidth={1.25} />
-          </div>
-          <div>
-            <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {isLoading ? 'Loading…' : tenant?.name ?? 'Organization'}
-            </p>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              {tenant?.slug ? `@${tenant.slug}` : '—'}
-            </p>
-          </div>
-        </div>
-
-        <dl className="divide-y divide-gray-200 dark:divide-gray-800">
-          <div className="px-6 py-4 flex gap-4">
-            <dt className="flex items-start gap-2 text-sm text-gray-500 dark:text-gray-400 w-40 shrink-0">
-              <Fingerprint className="h-4 w-4 mt-0.5 shrink-0" />
-              User ID
-            </dt>
-            <dd className="text-sm font-mono text-gray-900 dark:text-gray-100 break-all">
-              {userId ?? '—'}
-            </dd>
-          </div>
-          <div className="px-6 py-4 flex gap-4">
-            <dt className="flex items-start gap-2 text-sm text-gray-500 dark:text-gray-400 w-40 shrink-0">
-              <Building2 className="h-4 w-4 mt-0.5 shrink-0" />
-              Tenant ID
-            </dt>
-            <dd className="text-sm font-mono text-gray-900 dark:text-gray-100 break-all">
-              {tenantId ?? '—'}
-            </dd>
-          </div>
-          <div className="px-6 py-4 flex gap-4">
-            <dt className="flex items-start gap-2 text-sm text-gray-500 dark:text-gray-400 w-40 shrink-0">
-              <KeyRound className="h-4 w-4 mt-0.5 shrink-0" />
-              Plan
-            </dt>
-            <dd className="text-sm text-gray-900 dark:text-gray-100 capitalize">
-              {isError ? 'Unable to load' : tenant?.plan ?? '—'}
-            </dd>
-          </div>
-          <div className="px-6 py-4 flex gap-4">
-            <dt className="flex items-start gap-2 text-sm text-gray-500 dark:text-gray-400 w-40 shrink-0">
-              <CreditCard className="h-4 w-4 mt-0.5 shrink-0" />
-              Credits
-            </dt>
-            <dd className="text-sm text-gray-900 dark:text-gray-100">
-              {tenant
-                ? `${tenant.credits_remaining} remaining · ${tenant.credits_monthly_limit} monthly limit`
-                : isLoading
-                  ? '…'
-                  : '—'}
-            </dd>
-          </div>
-        </dl>
-
-        <div className="px-6 py-4 bg-gray-50 dark:bg-gray-950/50 border-t border-gray-200 dark:border-gray-800 flex flex-wrap gap-3">
-          <Link
-            href="/settings"
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-800 transition-colors"
+      <div style={{ flex: 1, padding: '24px', maxWidth: '42rem' }}>
+        <div
+          style={{
+            border: '1px solid var(--hz-rule)',
+            borderRadius: 'var(--hz-lg)',
+            overflow: 'hidden',
+            background: 'var(--hz-bg)',
+          }}
+        >
+          <div
+            style={{
+              padding: '20px 24px',
+              borderBottom: '1px solid var(--hz-rule)',
+              background: 'var(--hz-bg2)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '16px',
+            }}
           >
-            <Settings className="h-4 w-4" />
-            Settings
-          </Link>
-          <Link
-            href="/billing"
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-800 transition-colors"
+            <div
+              style={{
+                width: '56px',
+                height: '56px',
+                borderRadius: '50%',
+                background: 'var(--hz-bg4)',
+                border: '1px solid var(--hz-rule)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <UserCircle style={{ width: 28, height: 28, color: 'var(--hz-muted)' }} strokeWidth={1.25} />
+            </div>
+            <div>
+              <p style={{ fontSize: '16px', fontWeight: 600, margin: 0, color: 'var(--hz-ink)' }}>
+                {isLoading ? 'Loading…' : tenant?.name ?? 'Organization'}
+              </p>
+              <p className="hz-sm" style={{ marginTop: '4px', marginBottom: 0, color: 'var(--hz-muted)' }}>
+                {tenant?.slug ? `@${tenant.slug}` : '—'}
+              </p>
+            </div>
+          </div>
+
+          <dl style={{ margin: 0 }}>
+            <div
+              style={{
+                display: 'flex',
+                gap: '16px',
+                padding: '14px 24px',
+                borderBottom: '1px solid var(--hz-rule)',
+                flexWrap: 'wrap',
+              }}
+            >
+              <dt
+                className="hz-sm"
+                style={{
+                  width: '140px',
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '8px',
+                  color: 'var(--hz-muted)',
+                  margin: 0,
+                }}
+              >
+                <Fingerprint style={{ width: 14, height: 14, marginTop: 2, flexShrink: 0 }} />
+                User ID
+              </dt>
+              <dd
+                style={{
+                  margin: 0,
+                  fontSize: '12px',
+                  fontFamily: 'inherit',
+                  color: 'var(--hz-ink)',
+                  wordBreak: 'break-all',
+                  flex: 1,
+                  minWidth: 0,
+                }}
+              >
+                {userId ?? '—'}
+              </dd>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                gap: '16px',
+                padding: '14px 24px',
+                borderBottom: '1px solid var(--hz-rule)',
+                flexWrap: 'wrap',
+              }}
+            >
+              <dt
+                className="hz-sm"
+                style={{
+                  width: '140px',
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '8px',
+                  color: 'var(--hz-muted)',
+                  margin: 0,
+                }}
+              >
+                <Building2 style={{ width: 14, height: 14, marginTop: 2, flexShrink: 0 }} />
+                Tenant ID
+              </dt>
+              <dd
+                style={{
+                  margin: 0,
+                  fontSize: '12px',
+                  fontFamily: 'inherit',
+                  color: 'var(--hz-ink)',
+                  wordBreak: 'break-all',
+                  flex: 1,
+                  minWidth: 0,
+                }}
+              >
+                {tenantId ?? '—'}
+              </dd>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                gap: '16px',
+                padding: '14px 24px',
+                borderBottom: '1px solid var(--hz-rule)',
+                flexWrap: 'wrap',
+              }}
+            >
+              <dt
+                className="hz-sm"
+                style={{
+                  width: '140px',
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '8px',
+                  color: 'var(--hz-muted)',
+                  margin: 0,
+                }}
+              >
+                <KeyRound style={{ width: 14, height: 14, marginTop: 2, flexShrink: 0 }} />
+                Plan
+              </dt>
+              <dd style={{ margin: 0, fontSize: '13px', color: 'var(--hz-ink)', textTransform: 'capitalize' }}>
+                {isError ? 'Unable to load' : tenant?.plan ?? '—'}
+              </dd>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                gap: '16px',
+                padding: '14px 24px',
+                borderBottom: '1px solid var(--hz-rule)',
+                flexWrap: 'wrap',
+              }}
+            >
+              <dt
+                className="hz-sm"
+                style={{
+                  width: '140px',
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '8px',
+                  color: 'var(--hz-muted)',
+                  margin: 0,
+                }}
+              >
+                <CreditCard style={{ width: 14, height: 14, marginTop: 2, flexShrink: 0 }} />
+                Credits
+              </dt>
+              <dd style={{ margin: 0, fontSize: '13px', color: 'var(--hz-ink)' }}>
+                {tenant
+                  ? `${tenant.credits_remaining} remaining · ${tenant.credits_monthly_limit} monthly limit`
+                  : isLoading
+                    ? '…'
+                    : '—'}
+              </dd>
+            </div>
+          </dl>
+
+          <div
+            style={{
+              padding: '16px 24px',
+              background: 'var(--hz-bg2)',
+              borderTop: '1px solid var(--hz-rule)',
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '10px',
+            }}
           >
-            <CreditCard className="h-4 w-4" />
-            Billing
-          </Link>
+            <Link href="/settings" className="hz-btn hz-btn-outline inline-flex items-center gap-2">
+              <Settings style={{ width: 16, height: 16 }} />
+              Settings
+            </Link>
+            <Link href="/billing" className="hz-btn hz-btn-outline inline-flex items-center gap-2">
+              <CreditCard style={{ width: 16, height: 16 }} />
+              Billing
+            </Link>
+          </div>
         </div>
       </div>
     </div>

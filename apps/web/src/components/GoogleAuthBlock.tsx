@@ -44,7 +44,7 @@ export function GoogleAuthBlock({ actionLabel = 'Continue with Google' }: { acti
         onClick={() => {
           window.location.href = `${API_URL}/auth/google/login`
         }}
-        className="w-full flex items-center justify-center gap-3 py-2.5 px-3 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-800 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+        className="hz-btn hz-btn-ghost w-full justify-center text-sm font-medium transition-opacity hover:opacity-90"
       >
         <GoogleIcon />
         {actionLabel}
@@ -52,10 +52,12 @@ export function GoogleAuthBlock({ actionLabel = 'Continue with Google' }: { acti
 
       <div className="relative my-6">
         <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-gray-200 dark:border-gray-700" />
+          <div className="w-full border-t" style={{ borderColor: 'var(--hz-rule)' }} />
         </div>
-        <div className="relative flex justify-center text-xs uppercase tracking-wide text-gray-400">
-          <span className="bg-white dark:bg-gray-900 px-2">or</span>
+        <div className="relative flex justify-center hz-label" style={{ letterSpacing: '0.12em' }}>
+          <span className="px-2" style={{ background: 'var(--hz-bg)' }}>
+            or
+          </span>
         </div>
       </div>
     </>

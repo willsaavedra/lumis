@@ -14,7 +14,7 @@ export function ThemeToggle() {
     const next = !dark
     setDark(next)
     document.documentElement.classList.toggle('dark', next)
-    localStorage.setItem('lumis_theme', next ? 'dark' : 'light')
+    localStorage.setItem('hz-theme', next ? 'dark' : 'light')
   }
 
   return (
@@ -22,7 +22,16 @@ export function ThemeToggle() {
       type="button"
       onClick={toggle}
       aria-label="Toggle theme"
-      className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+      className="w-8 h-8 flex items-center justify-center rounded-lg"
+      style={{ color: 'var(--hz-muted)', background: 'transparent' }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.color = 'var(--hz-ink)'
+        e.currentTarget.style.background = 'var(--hz-bg3)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.color = 'var(--hz-muted)'
+        e.currentTarget.style.background = 'transparent'
+      }}
     >
       {dark ? (
         <Sun className="w-4 h-4" strokeWidth={1.75} aria-hidden />

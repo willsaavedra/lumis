@@ -56,15 +56,20 @@ function IconBitbucket({ className }: { className?: string }) {
   )
 }
 
-// Shared code block shell — white/bordered in light, black in dark
 function CodeBlock({ filename, children }: { filename: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white dark:bg-black border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden text-xs">
-      <div className="flex items-center gap-1.5 px-4 py-3 border-b border-gray-200 dark:border-gray-800">
-        <span className="w-2.5 h-2.5 rounded-full bg-gray-300 dark:bg-gray-700" />
-        <span className="w-2.5 h-2.5 rounded-full bg-gray-300 dark:bg-gray-700" />
-        <span className="w-2.5 h-2.5 rounded-full bg-gray-300 dark:bg-gray-700" />
-        <span className="ml-2 text-gray-400 dark:text-gray-500">{filename}</span>
+    <div
+      className="rounded-xl overflow-hidden text-xs"
+      style={{ background: 'var(--hz-bg)', border: '1px solid var(--hz-rule)' }}
+    >
+      <div
+        className="flex items-center gap-1.5 px-4 py-3 border-b"
+        style={{ borderColor: 'var(--hz-rule)', background: 'var(--hz-bg2)' }}
+      >
+        <span className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--hz-rule2)' }} />
+        <span className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--hz-rule2)' }} />
+        <span className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--hz-rule2)' }} />
+        <span className="ml-2 hz-sm">{filename}</span>
       </div>
       {children}
     </div>
@@ -73,20 +78,27 @@ function CodeBlock({ filename, children }: { filename: string; children: React.R
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100">
-
+    <div className="relative min-h-screen" style={{ background: 'var(--hz-bg)', color: 'var(--hz-ink)' }}>
+      <div className="hz-grid-bg pointer-events-none fixed inset-0 z-0" style={{ opacity: 0.5 }} aria-hidden />
+      <div className="relative z-10 min-h-screen">
       {/* Nav */}
-      <nav className="border-b border-gray-200 dark:border-gray-800 px-10 py-4">
+      <nav className="px-10 py-4" style={{ borderBottom: '1px solid var(--hz-rule)' }}>
         <div className="flex items-center justify-between">
-          <span className="font-bold text-lg tracking-tight">lumis</span>
-          <div className="flex items-center gap-6 text-sm text-gray-500 dark:text-gray-400">
-            <Link href="/pricing" className="hover:text-gray-900 dark:hover:text-gray-100 transition-colors">pricing</Link>
-            <Link href="/login" className="hover:text-gray-900 dark:hover:text-gray-100 transition-colors">log in</Link>
+          <div>
+            <span className="font-bold text-lg tracking-tight" style={{ letterSpacing: '-0.04em', color: 'var(--hz-ink)' }}>
+              horion.pro<span className="hz-cursor" />
+            </span>
+            <p className="hz-micro mt-0.5" style={{ color: 'var(--hz-muted)' }}>Reliability Engineering Platform</p>
+          </div>
+          <div className="flex items-center gap-5 sm:gap-6">
+            <Link href="/pricing" className="hz-body transition-opacity hover:opacity-80" style={{ fontSize: '13px', color: 'var(--hz-muted)' }}>
+              pricing
+            </Link>
+            <Link href="/login" className="hz-body transition-opacity hover:opacity-80" style={{ fontSize: '13px', color: 'var(--hz-muted)' }}>
+              log in
+            </Link>
             <ThemeToggle />
-            <Link
-              href="/signup"
-              className="bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 px-4 py-1.5 rounded text-sm hover:bg-gray-700 dark:hover:bg-gray-300 transition-colors"
-            >
+            <Link href="/signup" className="hz-btn hz-btn-primary shrink-0">
               get started
             </Link>
           </div>
@@ -94,35 +106,35 @@ export default function LandingPage() {
       </nav>
 
       {/* Hero */}
-      <section className="px-10 pt-24 pb-20 border-b border-gray-100 dark:border-gray-800">
+      <section className="px-10 pt-24 pb-20" style={{ borderBottom: '1px solid var(--hz-rule)' }}>
         <div className="grid grid-cols-2 gap-16 items-center">
           <div>
-            <div className="inline-block text-xs text-gray-400 border border-gray-200 dark:border-gray-700 rounded px-2 py-1 mb-6">
-              AI-powered observability analysis
+            <div
+              className="inline-block hz-label rounded px-2 py-1 mb-6"
+              style={{ border: '1px solid var(--hz-rule)', color: 'var(--hz-muted)' }}
+            >
+              AI-powered reliability engineering analysis
             </div>
-            <h1 className="text-5xl font-bold leading-tight mb-6 tracking-tight">
+            <h1 className="text-5xl font-bold leading-tight mb-6 tracking-tight" style={{ color: 'var(--hz-ink)' }}>
               Your code ships.<br />
               Your metrics don&apos;t lie.<br />
-              <span className="text-gray-400 dark:text-gray-500">Lumis finds the gap.</span>
+              <span style={{ color: 'var(--hz-muted)' }}>Horion finds the gap.</span>
             </h1>
-            <p className="text-gray-500 dark:text-gray-400 text-base mb-8 leading-relaxed">
-              Connect your repo. Lumis analyzes metrics, logs, and traces instrumentation in your code,
+            <p className="hz-body text-base mb-8 max-w-xl">
+              Connect your repo. Horion analyzes metrics, logs, and traces instrumentation in your code,
               scores each pillar, and opens a PR with the actual fixes.
             </p>
-            <div className="flex items-center gap-4">
-              <Link
-                href="/signup"
-                className="bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 px-5 py-2.5 rounded text-sm font-medium hover:bg-gray-700 dark:hover:bg-gray-300 transition-colors"
-              >
+            <div className="flex flex-wrap items-center gap-4">
+              <Link href="/signup" className="hz-btn hz-btn-primary">
                 start free — no card required
               </Link>
-              <Link href="/pricing" className="text-sm text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors">
+              <Link href="/pricing" className="hz-btn hz-btn-outline">
                 see pricing
               </Link>
             </div>
           </div>
-          <CodeBlock filename="lumis — analysis complete">
-            <pre className="p-6 text-gray-900 dark:text-gray-100 leading-relaxed overflow-x-auto">{`$ lumis analyze --repo acme/payments --type full
+          <CodeBlock filename="horion — analysis complete">
+            <pre className="p-6 leading-relaxed overflow-x-auto text-xs" style={{ color: 'var(--hz-ink2)' }}>{`$ horion analyze --repo acme/payments --type full
 
   Cloning repo...        done
   Walking 47 files...    done
@@ -145,34 +157,34 @@ export default function LandingPage() {
 
       {/* How it works */}
       <section className="px-10 py-20">
-        <p className="text-xs uppercase tracking-widest text-gray-400 mb-16">how it works</p>
+        <p className="hz-label mb-16">how it works</p>
 
         {/* Step 1 — text left, code right */}
         <div className="mb-24 grid grid-cols-2 gap-16 items-center">
           <div>
-            <div className="text-xs text-gray-400 mb-2">01</div>
-            <h2 className="text-2xl font-bold mb-4">Connect your repository</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed mb-8">
-              Install the Lumis app on your org. Every push and PR triggers an automatic analysis.
+            <div className="hz-sm mb-2">01</div>
+            <h2 className="text-2xl font-bold mb-4" style={{ color: 'var(--hz-ink)' }}>Connect your repository</h2>
+            <p className="hz-body text-sm mb-8">
+              Install the Horion app on your org. Every push and PR triggers an automatic analysis.
               Or run manually anytime from the dashboard.
             </p>
             <div className="flex items-center gap-6">
-              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                <IconGitHub className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+              <div className="flex items-center gap-2 hz-body text-sm" style={{ color: 'var(--hz-muted)' }}>
+                <IconGitHub className="w-5 h-5 shrink-0" />
                 <span>GitHub</span>
               </div>
-              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                <IconGitLab className="w-5 h-5 text-orange-500" />
+              <div className="flex items-center gap-2 hz-body text-sm" style={{ color: 'var(--hz-muted)' }}>
+                <IconGitLab className="w-5 h-5 shrink-0" />
                 <span>GitLab</span>
               </div>
-              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                <IconBitbucket className="w-5 h-5 text-blue-500" />
+              <div className="flex items-center gap-2 hz-body text-sm" style={{ color: 'var(--hz-muted)' }}>
+                <IconBitbucket className="w-5 h-5 shrink-0" />
                 <span>Bitbucket</span>
               </div>
             </div>
           </div>
-          <CodeBlock filename="lumis.yml">
-            <pre className="p-6 text-gray-900 dark:text-gray-100 leading-relaxed overflow-x-auto">{`# .github/lumis.yml
+          <CodeBlock filename="horion.yml">
+            <pre className="p-6 leading-relaxed overflow-x-auto text-xs" style={{ color: 'var(--hz-ink2)' }}>{`# .github/horion.yml
 on:
   - push
   - pull_request
@@ -193,7 +205,7 @@ notify:
         {/* Step 2 — code left, text right */}
         <div className="mb-24 grid grid-cols-2 gap-16 items-center">
           <CodeBlock filename="analysis output">
-            <pre className="p-6 text-gray-900 dark:text-gray-100 leading-relaxed overflow-x-auto">{`{
+            <pre className="p-6 leading-relaxed overflow-x-auto text-xs" style={{ color: 'var(--hz-ink2)' }}>{`{
   "score_global": 61,
   "score_metrics": 48,   // missing histograms
   "score_logs":    72,   // high noise on DEBUG
@@ -210,9 +222,9 @@ notify:
 }`}</pre>
           </CodeBlock>
           <div>
-            <div className="text-xs text-gray-400 mb-2">02</div>
-            <h2 className="text-2xl font-bold mb-4">Lumis scores your instrumentation</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed mb-8">
+            <div className="hz-sm mb-2">02</div>
+            <h2 className="text-2xl font-bold mb-4" style={{ color: 'var(--hz-ink)' }}>Horion scores your instrumentation</h2>
+            <p className="hz-body text-sm mb-8">
               The agent clones your repo, walks every file, and grades metrics coverage,
               log signal-to-noise ratio, and trace propagation — each on a 0–100 scale.
             </p>
@@ -220,7 +232,7 @@ notify:
               {OBS_TOOLS.map(({ id, label, color, darkColor }) => (
                 <div
                   key={id}
-                  className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400"
+                  className="flex items-center gap-2 hz-body text-sm"
                 >
                   <span className="shrink-0 w-5 h-5 dark:hidden">
                     <ToolLogo id={id} label={label} color={color} size={20} />
@@ -238,27 +250,27 @@ notify:
         {/* Step 3 — text left, code right */}
         <div className="mb-24 grid grid-cols-2 gap-16 items-center">
           <div>
-            <div className="text-xs text-gray-400 mb-2">03</div>
-            <h2 className="text-2xl font-bold mb-4">Review findings in-context</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
+            <div className="hz-sm mb-2">03</div>
+            <h2 className="text-2xl font-bold mb-4" style={{ color: 'var(--hz-ink)' }}>Review findings in-context</h2>
+            <p className="hz-body text-sm">
               Each finding is pinned to the exact file and line. The suggested fix is shown as a
               complete code snippet — not a vague description.
             </p>
           </div>
           <CodeBlock filename="src/handlers/checkout.py  line 34">
-            <div className="p-6 leading-relaxed font-mono">
-              <div className="text-gray-400 dark:text-gray-500 mb-1"># before</div>
-              <div className="text-red-500 dark:text-red-400">-  logger.info(&quot;checkout started&quot;)</div>
-              <div className="text-red-500 dark:text-red-400">-  result = process_payment(cart)</div>
-              <div className="text-red-500 dark:text-red-400 mb-4">-  logger.info(&quot;checkout done&quot;)</div>
-              <div className="text-gray-400 dark:text-gray-500 mb-1"># after  (Lumis suggestion)</div>
-              <div className="text-green-600 dark:text-green-400">+  CHECKOUT_LATENCY = Histogram(</div>
-              <div className="text-green-600 dark:text-green-400">+      &quot;checkout_latency_seconds&quot;,</div>
-              <div className="text-green-600 dark:text-green-400">+      &quot;End-to-end checkout duration&quot;,</div>
-              <div className="text-green-600 dark:text-green-400">+      buckets=[.05,.1,.25,.5,1,2.5,5]</div>
-              <div className="text-green-600 dark:text-green-400">+  )</div>
-              <div className="text-green-600 dark:text-green-400">+  with CHECKOUT_LATENCY.time():</div>
-              <div className="text-green-600 dark:text-green-400">+      result = process_payment(cart)</div>
+            <div className="p-6 leading-relaxed font-mono text-xs">
+              <div className="mb-1 hz-sm"># before</div>
+              <div style={{ color: 'var(--hz-crit)' }}>-  logger.info(&quot;checkout started&quot;)</div>
+              <div style={{ color: 'var(--hz-crit)' }}>-  result = process_payment(cart)</div>
+              <div className="mb-4" style={{ color: 'var(--hz-crit)' }}>-  logger.info(&quot;checkout done&quot;)</div>
+              <div className="mb-1 hz-sm"># after  (Horion suggestion)</div>
+              <div style={{ color: 'var(--hz-ok)' }}>+  CHECKOUT_LATENCY = Histogram(</div>
+              <div style={{ color: 'var(--hz-ok)' }}>+      &quot;checkout_latency_seconds&quot;,</div>
+              <div style={{ color: 'var(--hz-ok)' }}>+      &quot;End-to-end checkout duration&quot;,</div>
+              <div style={{ color: 'var(--hz-ok)' }}>+      buckets=[.05,.1,.25,.5,1,2.5,5]</div>
+              <div style={{ color: 'var(--hz-ok)' }}>+  )</div>
+              <div style={{ color: 'var(--hz-ok)' }}>+  with CHECKOUT_LATENCY.time():</div>
+              <div style={{ color: 'var(--hz-ok)' }}>+      result = process_payment(cart)</div>
             </div>
           </CodeBlock>
         </div>
@@ -266,11 +278,11 @@ notify:
         {/* Step 4 — code left, text right */}
         <div className="grid grid-cols-2 gap-16 items-center">
           <CodeBlock filename="github pull request">
-            <pre className="p-6 text-gray-900 dark:text-gray-100 leading-relaxed overflow-x-auto">{`lumis-bot opened a PR 3 minutes ago
+            <pre className="p-6 leading-relaxed overflow-x-auto text-xs" style={{ color: 'var(--hz-ink2)' }}>{`horion-bot opened a PR 3 minutes ago
 
-[lumis] fix observability — 4 findings
+[horion] fix observability — 4 findings
 
-  branch: lumis/fix-observability-2024-04-01
+  branch: horion/fix-observability-2024-04-01
 
   | file                        | finding             |
   |-----------------------------|---------------------|
@@ -282,9 +294,9 @@ notify:
   Score before: 61  ->  Score after (est.): 84`}</pre>
           </CodeBlock>
           <div>
-            <div className="text-xs text-gray-400 mb-2">04</div>
-            <h2 className="text-2xl font-bold mb-4">Merge the fix PR</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
+            <div className="hz-sm mb-2">04</div>
+            <h2 className="text-2xl font-bold mb-4" style={{ color: 'var(--hz-ink)' }}>Merge the fix PR</h2>
+            <p className="hz-body text-sm">
               One click enqueues Claude to write the actual patches, push a branch,
               and open a PR. You review, merge, and ship better observability.
             </p>
@@ -293,33 +305,37 @@ notify:
       </section>
 
       {/* CTA */}
-      <section className="border-t border-gray-100 dark:border-gray-800">
+      <section style={{ borderTop: '1px solid var(--hz-rule)' }}>
         <div className="px-10 py-20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
           <div>
-            <h2 className="text-2xl font-bold mb-1">Ready to illuminate your stack?</h2>
-            <p className="text-sm text-gray-400">50 free credits every month. No credit card required.</p>
+            <h2 className="text-2xl font-bold mb-1" style={{ color: 'var(--hz-ink)' }}>Ready to illuminate your stack?</h2>
+            <p className="hz-body text-sm">50 free credits every month. No credit card required.</p>
           </div>
-          <Link
-            href="/signup"
-            className="bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 px-6 py-3 rounded text-sm font-medium hover:bg-gray-700 dark:hover:bg-gray-300 transition-colors whitespace-nowrap"
-          >
+          <Link href="/signup" className="hz-btn hz-btn-primary whitespace-nowrap px-6 py-3">
             get started free
           </Link>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-gray-100 dark:border-gray-800">
-        <div className="px-10 py-6 flex items-center justify-between text-xs text-gray-400">
-          <span>lumis</span>
+      <footer style={{ borderTop: '1px solid var(--hz-rule)' }}>
+        <div className="px-10 py-6 flex flex-wrap items-center justify-between gap-4 hz-sm">
+          <span style={{ fontWeight: 700, letterSpacing: '-0.04em', color: 'var(--hz-ink)' }}>horion.pro</span>
           <div className="flex items-center gap-6">
-            <Link href="/pricing" className="hover:text-gray-700 dark:hover:text-gray-200 transition-colors">pricing</Link>
-            <Link href="/login" className="hover:text-gray-700 dark:hover:text-gray-200 transition-colors">log in</Link>
-            <Link href="/signup" className="hover:text-gray-700 dark:hover:text-gray-200 transition-colors">sign up</Link>
+            <Link href="/pricing" style={{ color: 'var(--hz-muted)' }} className="transition-opacity hover:opacity-80">
+              pricing
+            </Link>
+            <Link href="/login" style={{ color: 'var(--hz-muted)' }} className="transition-opacity hover:opacity-80">
+              log in
+            </Link>
+            <Link href="/signup" style={{ color: 'var(--hz-muted)' }} className="transition-opacity hover:opacity-80">
+              sign up
+            </Link>
           </div>
         </div>
       </footer>
 
+      </div>
     </div>
   )
 }

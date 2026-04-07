@@ -2,17 +2,302 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ═══════════════════════════════════════════════════════════════
+   Horion.pro — Design System v1.0
+   All colors come from CSS variables. Tailwind: layout/spacing only.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── LIGHT MODE TOKENS ── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Backgrounds */
+  --hz-bg:   #ffffff;
+  --hz-bg2:  #f8f8f6;
+  --hz-bg3:  #f0f0ec;
+  --hz-bg4:  #e8e8e2;
+
+  /* Text */
+  --hz-ink:   #0a0a0a;
+  --hz-ink2:  #3a3a3a;
+  --hz-muted: #888880;
+
+  /* Borders */
+  --hz-rule:  #e4e4de;
+  --hz-rule2: #d0d0c8;
+
+  /* Semantic — analysis / reliability signals (findings, grades, status); never decorative */
+  --hz-crit:    #c0392b;
+  --hz-crit-bg: #fef2f2;
+  --hz-crit-bd: #fca5a5;
+  --hz-warn:    #b7791f;
+  --hz-warn-bg: #fffbeb;
+  --hz-warn-bd: #fcd34d;
+  --hz-ok:      #276749;
+  --hz-ok-bg:   #ecfdf5;
+  --hz-ok-bd:   #6ee7b7;
+  --hz-info:    #1a4480;
+  --hz-info-bg: #eff6ff;
+
+  /* Radius tokens */
+  --hz-sm: 4px;
+  --hz-md: 8px;
+  --hz-lg: 12px;
+
+  /* Legacy compat */
+  --background: var(--hz-bg);
+  --foreground: var(--hz-ink);
 }
 
+/* ── DARK MODE TOKENS ── */
 .dark {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  --hz-bg:   #0e0e10;
+  --hz-bg2:  #141416;
+  --hz-bg3:  #1c1c20;
+  --hz-bg4:  #242428;
+
+  --hz-ink:   #f0f0ee;
+  --hz-ink2:  #b8b8b4;
+  --hz-muted: #666660;
+
+  --hz-rule:  #2a2a2e;
+  --hz-rule2: #38383e;
+
+  --hz-crit:    #f87171;
+  --hz-crit-bg: #2d1515;
+  --hz-crit-bd: #7f1d1d;
+  --hz-warn:    #fbbf24;
+  --hz-warn-bg: #261d08;
+  --hz-warn-bd: #78350f;
+  --hz-ok:      #4ade80;
+  --hz-ok-bg:   #0d2416;
+  --hz-ok-bd:   #14532d;
+  --hz-info:    #60a5fa;
+  --hz-info-bg: #0d1e3a;
+
+  --background: var(--hz-bg);
+  --foreground: var(--hz-ink);
 }
 
+/* ── BASE ── */
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--hz-bg);
+  color: var(--hz-ink);
 }
+
+/* Smooth theme transition on all elements */
+*, *::before, *::after {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+/* ── CODING EFFECTS ── */
+
+/* 1. Blinking cursor — logo wordmark + loading states */
+.hz-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 14px;
+  background: var(--hz-ink);
+  vertical-align: middle;
+  margin-left: 1px;
+  animation: hz-blink 1.1s step-end infinite;
+}
+
+@keyframes hz-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+/* 2. Dot-grid background — hero sections, stat bars, pricing */
+.hz-grid-bg {
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.dark .hz-grid-bg {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* 3. Scanline overlay — terminal cards and code blocks only */
+.hz-scanline {
+  position: relative;
+  overflow: hidden;
+}
+
+.hz-scanline::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    rgba(0, 0, 0, 0.012) 3px,
+    rgba(0, 0, 0, 0.012) 4px
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 4. Inline code token — file paths and function names in body text */
+.hz-tok {
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--hz-bg3);
+  border: 1px solid var(--hz-rule);
+  color: var(--hz-ink2);
+}
+
+/* ── TYPOGRAPHY SCALE ── */
+.hz-hero  { font-size: 40px; font-weight: 700; letter-spacing: -0.03em;  line-height: 1.05; }
+.hz-h1    { font-size: 28px; font-weight: 700; letter-spacing: -0.025em; }
+.hz-h2    { font-size: 20px; font-weight: 500; }
+.hz-body  { font-size: 14px; font-weight: 400; line-height: 1.7; color: var(--hz-ink2); }
+.hz-sm    { font-size: 12px; color: var(--hz-muted); }
+.hz-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--hz-muted); }
+.hz-micro { font-size: 10px; }
+
+/* ── BUTTON ── */
+.hz-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: var(--hz-md);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  border: 1px solid;
+  transition: opacity 0.12s;
+}
+
+.hz-btn:hover { opacity: 0.85; }
+.hz-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.hz-btn-primary { background: var(--hz-ink); border-color: var(--hz-ink); color: var(--hz-bg); }
+.hz-btn-outline  { background: transparent; border-color: var(--hz-ink); color: var(--hz-ink); }
+.hz-btn-ghost    { background: transparent; border-color: var(--hz-rule2); color: var(--hz-ink2); }
+
+/* ── BADGE ── */
+.hz-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--hz-sm);
+  border: 1px solid var(--hz-rule2);
+  background: var(--hz-bg);
+  font-size: 11px;
+  color: var(--hz-ink2);
+}
+
+.hz-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--hz-muted);
+  flex-shrink: 0;
+}
+
+.hz-badge-crit { border-color: var(--hz-crit-bd); color: var(--hz-crit); background: var(--hz-crit-bg); }
+.hz-badge-crit .hz-dot { background: var(--hz-crit); }
+.hz-badge-warn { border-color: var(--hz-warn-bd); color: var(--hz-warn); background: var(--hz-warn-bg); }
+.hz-badge-warn .hz-dot { background: var(--hz-warn); }
+.hz-badge-ok   { border-color: var(--hz-ok-bd);   color: var(--hz-ok);   background: var(--hz-ok-bg);  }
+.hz-badge-ok   .hz-dot { background: var(--hz-ok); }
+.hz-badge-info { color: var(--hz-info); background: var(--hz-info-bg); border-color: var(--hz-info); }
+.hz-badge-info .hz-dot { background: var(--hz-info); animation: hz-pulse 1s ease infinite; }
+
+@keyframes hz-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+/* ── SCORE GAUGE ── */
+.hz-score {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 18px;
+  border: 1px solid var(--hz-rule);
+  border-radius: var(--hz-md);
+  background: var(--hz-bg);
+  min-width: 76px;
+}
+
+.hz-score-num   { font-size: 28px; font-weight: 700; letter-spacing: -0.04em; line-height: 1; }
+.hz-score-grade { font-size: 11px; font-weight: 500; padding: 1px 6px; border-radius: 3px; }
+.hz-score-lbl   { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--hz-muted); }
+.hz-score-bar   { width: 100%; height: 3px; border-radius: 2px; background: var(--hz-rule); overflow: hidden; margin-top: 2px; }
+.hz-score-fill  { height: 100%; border-radius: 2px; transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
+
+/* Grade color mapping — A=ok / B=info / C=warn / D=crit */
+.hz-grade-a { color: var(--hz-ok);   background: var(--hz-ok-bg);   }
+.hz-grade-b { color: var(--hz-info); background: var(--hz-info-bg); }
+.hz-grade-c { color: var(--hz-warn); background: var(--hz-warn-bg); }
+.hz-grade-d { color: var(--hz-crit); background: var(--hz-crit-bg); }
+
+/* ── FINDING CARD ── */
+.hz-fc {
+  display: grid;
+  grid-template-columns: 8px 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+  border: 1px solid var(--hz-rule);
+  border-radius: var(--hz-md);
+  background: var(--hz-bg);
+}
+
+.hz-fc-bar         { width: 3px; min-height: 40px; border-radius: 2px; background: var(--hz-muted); margin-top: 2px; }
+.hz-fc-bar-crit    { background: var(--hz-crit); }
+.hz-fc-bar-warn    { background: var(--hz-warn); }
+.hz-fc-bar-ok      { background: var(--hz-ok); }
+.hz-fc-title       { font-size: 12px; font-weight: 500; margin-bottom: 3px; color: var(--hz-ink); }
+.hz-fc-detail      { font-size: 11px; color: var(--hz-muted); line-height: 1.5; }
+.hz-fc-loc         { display: inline-block; margin-top: 6px; font-size: 10px; color: var(--hz-muted); background: var(--hz-bg3); border: 1px solid var(--hz-rule); border-radius: 3px; padding: 1px 6px; }
+
+/* ── TERMINAL CARD ── */
+.hz-term {
+  background: var(--hz-bg2);
+  border: 1px solid var(--hz-rule);
+  border-radius: var(--hz-lg);
+  overflow: hidden;
+}
+
+.hz-term-bar   { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--hz-rule); background: var(--hz-bg3); }
+.hz-term-dot   { width: 10px; height: 10px; border-radius: 50%; background: var(--hz-rule2); }
+.hz-term-title { font-size: 11px; color: var(--hz-muted); margin-left: 4px; letter-spacing: 0.04em; }
+.hz-term-body  { padding: 16px; font-size: 12px; line-height: 1.85; color: var(--hz-ink2); }
+
+/* ── NAV TAB ── */
+.hz-tab-nav { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--hz-rule); border-radius: var(--hz-md); background: var(--hz-bg3); width: fit-content; }
+.hz-tab     { padding: 5px 14px; border-radius: 6px; font-size: 12px; color: var(--hz-muted); cursor: pointer; }
+.hz-tab.active { background: var(--hz-bg); color: var(--hz-ink); border: 1px solid var(--hz-rule2); }
+
+/* ── TABLE ROW ANIMATION ── */
+@keyframes hz-row-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── INPUT ── */
+.hz-inp {
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: var(--hz-md);
+  border: 1px solid var(--hz-rule2);
+  background: var(--hz-bg);
+  color: var(--hz-ink);
+  outline: none;
+  transition: border-color 0.12s;
+}
+
+.hz-inp:focus { border-color: var(--hz-ink); }
+.hz-inp::placeholder { color: var(--hz-muted); }

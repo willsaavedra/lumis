@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { authApi, type TenantSummary } from '@/lib/api'
 import { useAuthStore } from '@/lib/store'
@@ -49,21 +50,66 @@ export default function SelectTenantPage() {
 
   if (loading) {
     return (
-      <div className="bg-white dark:bg-gray-900 p-8 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 text-center">
-        <div className="w-8 h-8 border-2 border-gray-300 dark:border-gray-600 border-t-gray-900 dark:border-t-gray-100 rounded-full animate-spin mx-auto" />
+      <div
+        className="rounded-lg p-10 flex flex-col items-center justify-center min-h-[120px]"
+        style={{
+          background: 'var(--hz-bg)',
+          border: '1px solid var(--hz-rule)',
+          borderRadius: 'var(--hz-lg)',
+        }}
+      >
+        <span
+          className="inline-block rounded-full animate-spin"
+          style={{
+            width: '28px',
+            height: '28px',
+            border: '2px solid var(--hz-rule2)',
+            borderTopColor: 'var(--hz-ink)',
+          }}
+        />
       </div>
     )
   }
 
   return (
-    <div className="bg-white dark:bg-gray-900 p-8 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+    <div
+      className="rounded-lg p-8 sm:p-10"
+      style={{
+        background: 'var(--hz-bg)',
+        border: '1px solid var(--hz-rule)',
+        borderRadius: 'var(--hz-lg)',
+      }}
+    >
       <div className="text-center mb-6">
-        <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Choose a workspace</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">You belong to more than one organization.</p>
+        <Link href="/" className="inline-block mb-5">
+          <div style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '-0.04em', color: 'var(--hz-ink)' }}>
+            horion.pro<span className="hz-cursor" />
+          </div>
+          <p className="hz-micro" style={{ color: 'var(--hz-muted)', marginTop: '4px' }}>
+            Reliability Engineering Platform
+          </p>
+        </Link>
+        <h1 className="hz-h2" style={{ margin: 0, color: 'var(--hz-ink)', fontSize: '22px', fontWeight: 600 }}>
+          Choose a workspace
+        </h1>
+        <p className="hz-body" style={{ marginTop: '8px', marginBottom: 0 }}>
+          You belong to more than one organization.
+        </p>
       </div>
+
       {error && (
-        <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm">{error}</div>
+        <div
+          className="rounded-md px-3 py-2.5 hz-sm mb-4"
+          style={{
+            background: 'var(--hz-crit-bg)',
+            border: '1px solid var(--hz-crit-bd)',
+            color: 'var(--hz-crit)',
+          }}
+        >
+          {error}
+        </div>
       )}
+
       <ul className="space-y-2">
         {tenants.map((t) => (
           <li key={t.tenant_id}>
@@ -71,10 +117,14 @@ export default function SelectTenantPage() {
               type="button"
               disabled={switching !== null}
               onClick={() => choose(t.tenant_id)}
-              className="w-full text-left px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
+              className="w-full text-left rounded-md px-4 py-3 transition-opacity disabled:opacity-45 hz-btn hz-btn-ghost"
+              style={{
+                borderColor: 'var(--hz-rule)',
+                background: 'var(--hz-bg2)',
+              }}
             >
-              <div className="font-medium text-gray-900 dark:text-gray-100">{t.name}</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400 capitalize">{t.role}</div>
+              <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--hz-ink)' }}>{t.name}</div>
+              <div className="hz-sm capitalize mt-0.5">{t.role}</div>
             </button>
           </li>
         ))}

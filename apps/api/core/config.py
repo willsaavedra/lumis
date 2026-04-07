@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     anthropic_model_primary: str = "claude-sonnet-4-20250514"
     anthropic_model_triage: str = "claude-haiku-4-5-20251001"
 
+    # CerebraAI (OpenAI-compatible vLLM — Qwen)
+    cerebra_ai_base_url: str = "http://52.86.35.131:8001/v1"
+    cerebra_ai_api_key: str = ""
+    cerebra_ai_model_primary: str = "Qwen/Qwen3.5-35B-A3B-FP8"
+    cerebra_ai_model_triage: str = "Qwen/Qwen3.5-35B-A3B-FP8"
+    cerebra_ai_temperature: float = 0.4
+    cerebra_ai_top_p: float = 0.9
+    cerebra_ai_timeout: int = 300
+
     # OpenAI — used only for text embeddings (RAG: knowledge_chunks + retrieve_context)
     openai_api_key: str = ""
     openai_embedding_model: str = "text-embedding-3-small"
@@ -111,6 +120,9 @@ class Settings(BaseSettings):
 
     api_base_url: str = "http://localhost:8000"
     frontend_url: str = "http://localhost:3000"
+
+    # Celery worker → Lumis Agent HTTP (analysis graph runs in agent process)
+    agent_base_url: str = "http://localhost:8001"
 
     # Google OAuth (Sign in with Google) — leave empty to disable
     google_oauth_client_id: str = ""

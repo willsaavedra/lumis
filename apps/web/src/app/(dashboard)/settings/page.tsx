@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type CSSProperties } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
 import { authApi, teamApi, connectionsApi, vendorsApi, VendorConnection } from '@/lib/api'
@@ -56,8 +56,14 @@ export default function SettingsPage() {
   useEffect(() => {
     const connected = searchParams.get('connected')
     const error = searchParams.get('error')
-    if (connected) { setActiveTab('connections'); setConnectionStatus('connected') }
-    if (error) { setActiveTab('connections'); setConnectionStatus('error') }
+    if (connected) {
+      setActiveTab('connections')
+      setConnectionStatus('connected')
+    }
+    if (error) {
+      setActiveTab('connections')
+      setConnectionStatus('error')
+    }
   }, [searchParams])
   const qc = useQueryClient()
 
@@ -119,68 +125,92 @@ export default function SettingsPage() {
 
   const [newKeyResult, setNewKeyResult] = useState<string | null>(null)
 
+  const card: CSSProperties = {
+    border: '1px solid var(--hz-rule)',
+    borderRadius: 'var(--hz-lg)',
+    overflow: 'hidden',
+    background: 'var(--hz-bg)',
+  }
+
   return (
-    <div className="p-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', background: 'var(--hz-bg)' }}>
+      <div style={{ padding: '18px 24px 12px', borderBottom: '1px solid var(--hz-rule)' }}>
+        <h1 className="hz-h2" style={{ margin: 0, color: 'var(--hz-ink)' }}>Settings</h1>
+        <p className="hz-body" style={{ marginTop: '6px', marginBottom: 0, fontSize: '12px', color: 'var(--hz-muted)' }}>
+          API access, team, Git connections, and observability integrations
+        </p>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-4 border-b border-gray-200 dark:border-gray-700 mb-6">
-        {(['api-keys', 'team', 'connections', 'integrations'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`pb-3 text-sm font-medium capitalize ${
-              activeTab === tab
-                ? 'border-b-2 border-gray-900 dark:border-gray-100 text-gray-900 dark:text-gray-100'
-                : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
-            }`}
-          >
-            {tab.replace('-', ' ')}
-          </button>
-        ))}
+      <div style={{ padding: '16px 24px 0', borderBottom: '1px solid var(--hz-rule)', background: 'var(--hz-bg2)' }}>
+        <div className="hz-tab-nav" style={{ marginBottom: '-1px' }}>
+          {(['api-keys', 'team', 'connections', 'integrations'] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={`hz-tab ${activeTab === tab ? 'active' : ''}`}
+            >
+              {tab.replace('-', ' ')}
+            </button>
+          ))}
+        </div>
       </div>
 
+      <div style={{ flex: 1, padding: '24px', maxWidth: '900px' }}>
       {/* API Keys */}
       {activeTab === 'api-keys' && (
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700">
-          <div className="flex items-center justify-between p-5 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="font-semibold text-gray-900 dark:text-gray-100">API Keys</h2>
+        <div style={card}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--hz-rule)', background: 'var(--hz-bg2)' }}>
+            <h2 className="hz-h2" style={{ fontSize: '14px', margin: 0, color: 'var(--hz-ink)' }}>API Keys</h2>
             <button
+              type="button"
               onClick={async () => {
                 const result = await createKeyMutation.mutateAsync('New Key')
                 setNewKeyResult(result.api_key)
               }}
-              className="px-3 py-1.5 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-lg text-xs font-medium hover:bg-gray-700 dark:hover:bg-gray-300"
+              className="hz-btn hz-btn-primary"
+              style={{ fontSize: '11px', padding: '6px 12px' }}
             >
               Create key
             </button>
           </div>
 
           {newKeyResult && (
-            <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-100 dark:border-yellow-800">
-              <p className="text-xs text-yellow-800 dark:text-yellow-400 mb-2 font-medium">Save this key — it will never be shown again:</p>
-              <code className="block bg-gray-950 dark:bg-black text-green-400 p-3 rounded text-xs break-all">{newKeyResult}</code>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--hz-rule)', background: 'var(--hz-warn-bg)', borderLeft: '3px solid var(--hz-warn)' }}>
+              <p className="hz-sm" style={{ margin: '0 0 8px', fontWeight: 500, color: 'var(--hz-warn)' }}>Save this key — it will never be shown again:</p>
+              <code className="hz-term hz-scanline block p-3 rounded-md hz-sm" style={{ wordBreak: 'break-all', color: 'var(--hz-ok)' }}>{newKeyResult}</code>
               <button
+                type="button"
                 onClick={() => setNewKeyResult(null)}
-                className="mt-2 text-xs text-yellow-700 dark:text-yellow-500 underline"
+                className="hz-sm mt-2 underline underline-offset-2"
+                style={{ color: 'var(--hz-warn)', background: 'none', border: 'none', cursor: 'pointer' }}
               >
                 I saved it
               </button>
             </div>
           )}
 
-          <div className="divide-y divide-gray-100 dark:divide-gray-800">
-            {(apiKeys as Array<{ id: string; label: string; key_hint: string; created_at: string }>)?.map((key) => (
-              <div key={key.id} className="flex items-center justify-between p-4">
+          <div>
+            {(apiKeys as Array<{ id: string; label: string; key_hint: string; created_at: string }>)?.map((key, ki) => (
+              <div
+                key={key.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '14px 20px',
+                  borderTop: ki > 0 ? '1px solid var(--hz-rule)' : undefined,
+                }}
+              >
                 <div>
-                  <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{key.label}</div>
-                  <div className="text-xs text-gray-400 dark:text-gray-500">...{key.key_hint}</div>
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--hz-ink)' }}>{key.label}</div>
+                  <div className="hz-sm" style={{ color: 'var(--hz-muted)' }}>...{key.key_hint}</div>
                 </div>
                 <button
+                  type="button"
                   onClick={() => revokeKeyMutation.mutate(key.id)}
-                  className="text-xs text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                  className="hz-sm"
+                  style={{ color: 'var(--hz-crit)', background: 'none', border: 'none', cursor: 'pointer' }}
                 >
                   Revoke
                 </button>
@@ -192,10 +222,10 @@ export default function SettingsPage() {
 
       {/* Team */}
       {activeTab === 'team' && (
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4">
           {membershipRole === 'admin' && (
-            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">Invite member</h3>
+            <div style={{ ...card, padding: '20px' }}>
+              <h3 className="hz-h2" style={{ fontSize: '13px', margin: '0 0 12px', color: 'var(--hz-ink)' }}>Invite member</h3>
               <form
                 className="flex flex-col sm:flex-row gap-3 sm:items-end"
                 onSubmit={(e) => {
@@ -205,21 +235,21 @@ export default function SettingsPage() {
                 }}
               >
                 <div className="flex-1">
-                  <label className="block text-xs text-gray-500 mb-1">Email</label>
+                  <label className="hz-label block mb-1" style={{ color: 'var(--hz-muted)' }}>Email</label>
                   <input
                     type="email"
                     required
                     value={inviteEmail}
                     onChange={(e) => setInviteEmail(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800"
+                    className="hz-inp w-full px-3 py-2 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Role</label>
+                  <label className="hz-label block mb-1" style={{ color: 'var(--hz-muted)' }}>Role</label>
                   <select
                     value={inviteRole}
                     onChange={(e) => setInviteRole(e.target.value as 'admin' | 'operator' | 'viewer')}
-                    className="w-full sm:w-36 px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 capitalize"
+                    className="hz-inp w-full sm:w-36 px-3 py-2 text-sm capitalize"
                   >
                     <option value="viewer">Viewer</option>
                     <option value="operator">Operator</option>
@@ -229,18 +259,20 @@ export default function SettingsPage() {
                 <button
                   type="submit"
                   disabled={inviteMutation.isPending}
-                  className="px-4 py-2 text-sm font-medium rounded-lg bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 disabled:opacity-50"
+                  className="hz-btn hz-btn-primary disabled:opacity-50"
+                  style={{ fontSize: '13px' }}
                 >
                   {inviteMutation.isPending ? 'Creating…' : 'Create invite link'}
                 </button>
               </form>
               {inviteLink && (
-                <div className="mt-4 p-3 rounded-lg bg-gray-50 dark:bg-gray-800 text-xs break-all">
-                  <p className="text-gray-500 mb-1">Share this link (expires in 14 days):</p>
+                <div className="mt-4 p-3 rounded-md hz-sm" style={{ background: 'var(--hz-bg3)', border: '1px solid var(--hz-rule)', wordBreak: 'break-all' }}>
+                  <p style={{ color: 'var(--hz-muted)', margin: '0 0 6px' }}>Share this link (expires in 14 days):</p>
                   <button
                     type="button"
                     onClick={() => navigator.clipboard.writeText(inviteLink)}
-                    className="text-left text-gray-900 dark:text-gray-100 hover:underline"
+                    className="text-left hover:underline"
+                    style={{ color: 'var(--hz-ink)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px' }}
                   >
                     {inviteLink}
                   </button>
@@ -249,19 +281,23 @@ export default function SettingsPage() {
             </div>
           )}
           {membershipRole !== 'admin' && (
-            <p className="text-sm text-gray-500 dark:text-gray-400">Only workspace admins can invite members.</p>
+            <p className="hz-body" style={{ color: 'var(--hz-muted)' }}>Only workspace admins can invite members.</p>
           )}
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700">
-            <div className="p-5 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="font-semibold text-gray-900 dark:text-gray-100">Team Members</h2>
+          <div style={card}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--hz-rule)', background: 'var(--hz-bg2)' }}>
+              <h2 className="hz-h2" style={{ fontSize: '14px', margin: 0, color: 'var(--hz-ink)' }}>Team Members</h2>
             </div>
-            <div className="divide-y divide-gray-100 dark:divide-gray-800">
-              {(members as Array<{ id: string; email: string; role: string }>)?.map((m) => (
-                <div key={m.id} className="flex items-center justify-between p-4">
-                  <div>
-                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{m.email}</div>
-                    <div className="text-xs text-gray-400 dark:text-gray-500 capitalize">{m.role}</div>
-                  </div>
+            <div>
+              {(members as Array<{ id: string; email: string; role: string }>)?.map((m, mi) => (
+                <div
+                  key={m.id}
+                  style={{
+                    padding: '14px 20px',
+                    borderTop: mi > 0 ? '1px solid var(--hz-rule)' : undefined,
+                  }}
+                >
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--hz-ink)' }}>{m.email}</div>
+                  <div className="hz-sm capitalize" style={{ color: 'var(--hz-muted)' }}>{m.role}</div>
                 </div>
               ))}
             </div>
@@ -271,46 +307,46 @@ export default function SettingsPage() {
 
       {/* Integrations */}
       {activeTab === 'integrations' && (
-        <div className="space-y-4">
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Connect observability backends so Lumis can query metrics and traces during analysis.
+        <div className="flex flex-col gap-4">
+          <p className="hz-body" style={{ fontSize: '13px', color: 'var(--hz-muted)' }}>
+            Connect observability backends so Horion can query metrics and traces during analysis.
           </p>
           {VENDORS.map((vendor) => {
             const connected = (vendors as VendorConnection[] | undefined)?.find((v) => v.vendor === vendor.value)
             const isConnecting = connectingVendor === vendor.value
 
             return (
-              <div key={vendor.value} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700">
-                <div className="flex items-center justify-between px-5 py-4">
+              <div key={vendor.value} style={card}>
+                <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
                   <div className="flex items-center gap-3 min-w-0">
                     <ObsBackendLogo backend={vendor.value} className="shrink-0" imageClassName="h-6 w-6" />
                     <div className="min-w-0">
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{vendor.label}</div>
+                      <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--hz-ink)' }}>{vendor.label}</div>
                       {connected ? (
-                        <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                        <div className="hz-sm mt-0.5" style={{ color: 'var(--hz-muted)' }}>
                           {connected.display_name || connected.api_url || 'Connected'}
                         </div>
                       ) : (
-                        <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Not connected</div>
+                        <div className="hz-sm mt-0.5" style={{ color: 'var(--hz-muted)' }}>Not connected</div>
                       )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
                     {connected ? (
                       <>
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-xs font-medium text-green-700 dark:text-green-400">
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                          Connected
-                        </span>
+                        <span className="hz-badge hz-badge-ok"><span className="hz-dot" />Connected</span>
                         <button
+                          type="button"
                           onClick={() => deleteVendorMutation.mutate(connected.id)}
-                          className="text-xs text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 px-2"
+                          className="hz-sm"
+                          style={{ color: 'var(--hz-crit)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px' }}
                         >
                           Disconnect
                         </button>
                       </>
                     ) : (
                       <button
+                        type="button"
                         onClick={() => {
                           if (isConnecting) {
                             setConnectingVendor(null)
@@ -320,7 +356,8 @@ export default function SettingsPage() {
                             setVendorFields({})
                           }
                         }}
-                        className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                        className="hz-btn hz-btn-outline"
+                        style={{ fontSize: '11px', padding: '6px 12px' }}
                       >
                         {isConnecting ? 'Cancel' : 'Connect'}
                       </button>
@@ -329,21 +366,22 @@ export default function SettingsPage() {
                 </div>
 
                 {isConnecting && (
-                  <div className="px-5 pb-5 border-t border-gray-100 dark:border-gray-800 pt-4">
+                  <div style={{ padding: '16px 20px', borderTop: '1px solid var(--hz-rule)', background: 'var(--hz-bg2)' }}>
                     <div className="space-y-3">
                       {vendor.fields.map((field) => (
                         <div key={field.key}>
-                          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{field.label}</label>
+                          <label className="hz-label block mb-1" style={{ color: 'var(--hz-muted)' }}>{field.label}</label>
                           <input
                             type={field.key === 'api_key' ? 'password' : 'text'}
                             placeholder={field.placeholder}
                             value={vendorFields[field.key] || ''}
                             onChange={(e) => setVendorFields((f) => ({ ...f, [field.key]: e.target.value }))}
-                            className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                            className="hz-inp w-full px-3 py-2 text-sm"
                           />
                         </div>
                       ))}
                       <button
+                        type="button"
                         onClick={() => {
                           createVendorMutation.mutate({
                             vendor: vendor.value,
@@ -353,7 +391,8 @@ export default function SettingsPage() {
                           })
                         }}
                         disabled={createVendorMutation.isPending}
-                        className="w-full py-2 text-sm bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-lg font-medium hover:bg-gray-700 dark:hover:bg-gray-300 disabled:opacity-50"
+                        className="hz-btn hz-btn-primary w-full disabled:opacity-50"
+                        style={{ fontSize: '13px' }}
                       >
                         {createVendorMutation.isPending ? 'Saving...' : `Save ${vendor.label} connection`}
                       </button>
@@ -368,12 +407,24 @@ export default function SettingsPage() {
 
       {/* Connections */}
       {activeTab === 'connections' && (
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
-          <h2 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">SCM Connections</h2>
+        <div style={{ ...card, padding: '20px 24px' }}>
+          <h2 className="hz-h2" style={{ fontSize: '15px', margin: '0 0 16px', color: 'var(--hz-ink)' }}>SCM Connections</h2>
+
+          {connectionStatus === 'connected' && (
+            <div
+              className="mb-4 flex items-center gap-2 rounded-md px-4 py-3 hz-sm"
+              style={{ background: 'var(--hz-ok-bg)', border: '1px solid var(--hz-ok-bd)', color: 'var(--hz-ok)' }}
+            >
+              Git host connected successfully.
+            </div>
+          )}
 
           {connectionStatus === 'error' && (
-            <div className="mb-4 flex items-center gap-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-800 dark:text-red-400">
-              <svg className="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <div
+              className="mb-4 flex items-center gap-2 rounded-md px-4 py-3 hz-sm"
+              style={{ background: 'var(--hz-crit-bg)', border: '1px solid var(--hz-crit-bd)', color: 'var(--hz-crit)' }}
+            >
+              <svg className="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm-1-9v4a1 1 0 002 0V9a1 1 0 00-2 0zm1-4a1 1 0 100 2 1 1 0 000-2z" clipRule="evenodd" />
               </svg>
               SCM connection failed. Please try again or check API logs.
@@ -381,38 +432,40 @@ export default function SettingsPage() {
           )}
 
           {/* GitHub row */}
-          <div className="flex items-center justify-between py-3 border border-gray-200 dark:border-gray-700 rounded-lg px-4">
+          <div
+            className="flex flex-wrap items-center justify-between gap-3 py-3 px-4 rounded-md"
+            style={{ border: '1px solid var(--hz-rule)' }}
+          >
             <div className="flex items-center gap-3">
-              <svg className="w-6 h-6 text-gray-800 dark:text-gray-200" viewBox="0 0 24 24" fill="currentColor">
+              <svg style={{ width: 24, height: 24, color: 'var(--hz-ink)' }} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                 <path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z" />
               </svg>
               <div>
-                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">GitHub</div>
+                <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--hz-ink)' }}>GitHub</div>
                 {(() => {
                   const gh = connections?.find((c) => c.scm_type === 'github')
                   return gh ? (
-                    <div className="text-xs text-gray-400 dark:text-gray-500">
+                    <div className="hz-sm" style={{ color: 'var(--hz-muted)' }}>
                       Installation {gh.installation_id}
                       {gh.org_login && <> · {gh.org_login}</>}
                     </div>
                   ) : (
-                    <div className="text-xs text-gray-400 dark:text-gray-500">Not connected</div>
+                    <div className="hz-sm" style={{ color: 'var(--hz-muted)' }}>Not connected</div>
                   )
                 })()}
               </div>
             </div>
             {connections?.find((c) => c.scm_type === 'github') ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-xs font-medium text-green-700 dark:text-green-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                Connected
-              </span>
+              <span className="hz-badge hz-badge-ok"><span className="hz-dot" />Connected</span>
             ) : (
               <button
+                type="button"
                 onClick={() => {
-                  const token = localStorage.getItem('lumis_token') || ''
+                  const token = localStorage.getItem('hz-token') || ''
                   window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/connect/github?token=${encodeURIComponent(token)}`
                 }}
-                className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                className="hz-btn hz-btn-outline"
+                style={{ fontSize: '11px', padding: '6px 12px' }}
               >
                 Connect
               </button>
@@ -420,37 +473,38 @@ export default function SettingsPage() {
           </div>
 
           {/* GitLab */}
-          <div className="flex items-center justify-between py-3 border border-gray-200 dark:border-gray-700 rounded-lg px-4 mt-3">
+          <div
+            className="flex flex-wrap items-center justify-between gap-3 py-3 px-4 rounded-md mt-3"
+            style={{ border: '1px solid var(--hz-rule)' }}
+          >
             <div className="flex items-center gap-3">
               <img src="https://cdn.simpleicons.org/gitlab/FC6D26" alt="" className="w-6 h-6" />
               <div>
-                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">GitLab</div>
+                <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--hz-ink)' }}>GitLab</div>
                 {(() => {
                   const gl = connections?.find((c) => c.scm_type === 'gitlab')
                   return gl ? (
-                    <div className="text-xs text-gray-400 dark:text-gray-500">
+                    <div className="hz-sm" style={{ color: 'var(--hz-muted)' }}>
                       {gl.org_login ?? 'Connected'}
                       {gl.installation_id && <> · id {gl.installation_id}</>}
                     </div>
                   ) : (
-                    <div className="text-xs text-gray-400 dark:text-gray-500">Not connected (OAuth)</div>
+                    <div className="hz-sm" style={{ color: 'var(--hz-muted)' }}>Not connected (OAuth)</div>
                   )
                 })()}
               </div>
             </div>
             {connections?.find((c) => c.scm_type === 'gitlab') ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-xs font-medium text-green-700 dark:text-green-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                Connected
-              </span>
+              <span className="hz-badge hz-badge-ok"><span className="hz-dot" />Connected</span>
             ) : (
               <button
                 type="button"
                 onClick={() => {
-                  const token = localStorage.getItem('lumis_token') || ''
+                  const token = localStorage.getItem('hz-token') || ''
                   window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/connect/gitlab?token=${encodeURIComponent(token)}`
                 }}
-                className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                className="hz-btn hz-btn-outline"
+                style={{ fontSize: '11px', padding: '6px 12px' }}
               >
                 Connect
               </button>
@@ -458,36 +512,37 @@ export default function SettingsPage() {
           </div>
 
           {/* Bitbucket */}
-          <div className="flex items-center justify-between py-3 border border-gray-200 dark:border-gray-700 rounded-lg px-4 mt-3">
+          <div
+            className="flex flex-wrap items-center justify-between gap-3 py-3 px-4 rounded-md mt-3"
+            style={{ border: '1px solid var(--hz-rule)' }}
+          >
             <div className="flex items-center gap-3">
               <img src="https://cdn.simpleicons.org/bitbucket/0052CC" alt="" className="w-6 h-6" />
               <div>
-                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Bitbucket Cloud</div>
+                <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--hz-ink)' }}>Bitbucket Cloud</div>
                 {(() => {
                   const bb = connections?.find((c) => c.scm_type === 'bitbucket')
                   return bb ? (
-                    <div className="text-xs text-gray-400 dark:text-gray-500">
+                    <div className="hz-sm" style={{ color: 'var(--hz-muted)' }}>
                       {bb.org_login ?? 'Connected'}
                     </div>
                   ) : (
-                    <div className="text-xs text-gray-400 dark:text-gray-500">Not connected (OAuth)</div>
+                    <div className="hz-sm" style={{ color: 'var(--hz-muted)' }}>Not connected (OAuth)</div>
                   )
                 })()}
               </div>
             </div>
             {connections?.find((c) => c.scm_type === 'bitbucket') ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-xs font-medium text-green-700 dark:text-green-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                Connected
-              </span>
+              <span className="hz-badge hz-badge-ok"><span className="hz-dot" />Connected</span>
             ) : (
               <button
                 type="button"
                 onClick={() => {
-                  const token = localStorage.getItem('lumis_token') || ''
+                  const token = localStorage.getItem('hz-token') || ''
                   window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/connect/bitbucket?token=${encodeURIComponent(token)}`
                 }}
-                className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                className="hz-btn hz-btn-outline"
+                style={{ fontSize: '11px', padding: '6px 12px' }}
               >
                 Connect
               </button>
@@ -495,6 +550,7 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }

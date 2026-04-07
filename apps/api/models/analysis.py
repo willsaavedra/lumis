@@ -39,6 +39,7 @@ class AnalysisJob(Base):
         Enum("quick", "full", "repository", "context", name="analysis_type_enum"),
         nullable=False, default="full",
     )
+    llm_provider: Mapped[str] = mapped_column(Text, nullable=False, default="anthropic")
     credits_reserved: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     billing_reservation: Mapped[dict | None] = mapped_column(JSONB)
     credits_consumed: Mapped[int | None] = mapped_column(Integer)

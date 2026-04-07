@@ -7,7 +7,7 @@ import { formatDate } from '@/lib/utils'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { useSearchParams } from 'next/navigation'
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useState, type CSSProperties } from 'react'
 
 const PLANS = [
   { id: 'starter', name: 'Starter', price: '$49/mo', credits: '300 credits/month', overage: '$0.35/credit' },
@@ -29,6 +29,13 @@ const EVENT_LABELS: Record<string, string> = {
 }
 
 const TOPUP_PRESETS = [10, 25, 50]
+
+const cardShell: CSSProperties = {
+  border: '1px solid var(--hz-rule)',
+  borderRadius: 'var(--hz-lg)',
+  background: 'var(--hz-bg)',
+  overflow: 'hidden',
+}
 
 function BillingContent() {
   const searchParams = useSearchParams()
@@ -88,227 +95,331 @@ function BillingContent() {
   const extraUsd = usage?.extra_balance_usd ?? 0
   const approxExtraCredits = rate > 0 ? Math.floor(extraUsd / rate) : 0
 
+  const barColor = creditPct > 80 ? 'var(--hz-warn)' : 'var(--hz-ok)'
+
+  const hist = history as Array<{
+    id: string
+    event_type: string
+    credits_delta: number
+    usd_amount: number
+    description: string
+    created_at: string
+  }> | undefined
+
   return (
-    <div className="p-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Billing</h1>
-        <p className="text-gray-500 dark:text-gray-400">Manage your subscription and credits</p>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', background: 'var(--hz-bg)' }}>
+      <div style={{ padding: '18px 24px 16px', borderBottom: '1px solid var(--hz-rule)' }}>
+        <h1 className="hz-h2" style={{ margin: 0, color: 'var(--hz-ink)' }}>Billing</h1>
+        <p className="hz-body" style={{ marginTop: '6px', marginBottom: 0, fontSize: '12px', color: 'var(--hz-muted)' }}>
+          Subscription, included credits, and usage history
+        </p>
       </div>
 
-      {upgraded && (
-        <div className="mb-6 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl text-green-700 dark:text-green-400 text-sm">
-          Upgrade successful! Your credits have been reset.
-        </div>
-      )}
-
-      {topupOk && (
-        <div className="mb-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl text-amber-800 dark:text-amber-200 text-sm">
-          Extra balance added — your wallet has been updated.
-        </div>
-      )}
-
-      {topupCancelled && (
-        <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-600 dark:text-gray-400 text-sm">
-          Payment was cancelled. No charges were made.
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        {/* A: Plan + included credits */}
-        <div className="bg-white dark:bg-gray-900 p-6 rounded-xl border border-gray-200 dark:border-gray-700">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-gray-900 dark:text-gray-100">Current plan</h2>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium capitalize px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-full">
-                {currentPlan}
-              </span>
-              {usage?.stripe_status && usage.stripe_status !== 'active' && (
-                <span className="text-xs text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 px-2 py-0.5 rounded">
-                  {usage.stripe_status}
-                </span>
-              )}
+      {/* Mini stats */}
+      <div
+        className="grid grid-cols-1 sm:grid-cols-3 gap-px"
+        style={{ borderBottom: '1px solid var(--hz-rule)', background: 'var(--hz-rule)' }}
+      >
+        {[
+          {
+            label: 'Plan',
+            value: currentPlan,
+            sub: usage?.period_end ? `renews ${formatDate(usage.period_end)}` : 'workspace',
+            accent: 'var(--hz-ink)',
+          },
+          {
+            label: 'Credits used',
+            value: usage ? `${usage.credits_used} / ${usage.credits_included}` : '—',
+            sub: `${Math.min(100, creditPct)}% of period`,
+            accent: creditPct > 80 ? 'var(--hz-warn)' : 'var(--hz-info)',
+          },
+          {
+            label: 'Extra balance',
+            value: usage ? `$${extraUsd.toFixed(2)}` : '—',
+            sub: rate > 0 ? `overages @ $${rate.toFixed(2)}/cr` : 'wallet',
+            accent: 'var(--hz-ok)',
+          },
+        ].map((s, i) => (
+          <div
+            key={i}
+            style={{
+              padding: '12px 20px',
+              position: 'relative',
+              overflow: 'hidden',
+              background: 'var(--hz-bg)',
+            }}
+          >
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: s.accent }} />
+            <div className="hz-grid-bg" style={{ position: 'absolute', inset: 0, opacity: 0.45, pointerEvents: 'none' }} />
+            <div className="hz-label" style={{ marginBottom: '4px', position: 'relative', color: 'var(--hz-muted)' }}>
+              {s.label}
+            </div>
+            <div
+              style={{
+                fontSize: '18px',
+                fontWeight: 700,
+                letterSpacing: '-0.03em',
+                color: 'var(--hz-ink)',
+                lineHeight: 1.2,
+                position: 'relative',
+                textTransform: s.label === 'Plan' ? 'capitalize' : undefined,
+              }}
+            >
+              {s.value}
+            </div>
+            <div className="hz-sm" style={{ marginTop: '3px', position: 'relative' }}>
+              {s.sub}
             </div>
           </div>
+        ))}
+      </div>
 
-          <h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-            Included credits
-          </h3>
-          <div className="mb-4">
-            <div className="flex justify-between text-sm mb-1">
-              <span className="text-gray-500 dark:text-gray-400">Credits used</span>
-              <span className="font-medium text-gray-900 dark:text-gray-100">
-                {usage?.credits_used ?? '—'} / {usage?.credits_included ?? '—'}
-              </span>
+      <div style={{ flex: 1, padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        {upgraded && (
+          <div
+            className="hz-sm rounded-md px-4 py-3"
+            style={{
+              background: 'var(--hz-ok-bg)',
+              border: '1px solid var(--hz-ok-bd)',
+              color: 'var(--hz-ok)',
+            }}
+          >
+            Upgrade successful — your credits have been reset for the new period.
+          </div>
+        )}
+
+        {topupOk && (
+          <div
+            className="hz-sm rounded-md px-4 py-3"
+            style={{
+              background: 'var(--hz-warn-bg)',
+              border: '1px solid var(--hz-warn-bd)',
+              color: 'var(--hz-warn)',
+            }}
+          >
+            Extra balance added — your wallet has been updated.
+          </div>
+        )}
+
+        {topupCancelled && (
+          <div
+            className="hz-sm rounded-md px-4 py-3"
+            style={{
+              background: 'var(--hz-bg2)',
+              border: '1px solid var(--hz-rule)',
+              color: 'var(--hz-muted)',
+            }}
+          >
+            Payment was cancelled. No charges were made.
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Current plan */}
+          <div style={{ ...cardShell, padding: '20px' }}>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+              <h2 className="hz-h2" style={{ fontSize: '14px', margin: 0, color: 'var(--hz-ink)' }}>Current plan</h2>
+              <div className="flex items-center gap-2">
+                <span
+                  className="hz-sm font-medium capitalize px-2.5 py-0.5 rounded-full"
+                  style={{ background: 'var(--hz-bg3)', color: 'var(--hz-ink2)', border: '1px solid var(--hz-rule)' }}
+                >
+                  {currentPlan}
+                </span>
+                {usage?.stripe_status && usage.stripe_status !== 'active' && (
+                  <span className="hz-badge hz-badge-warn">
+                    <span className="hz-dot" />
+                    {usage.stripe_status}
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-              <div
-                className={`h-2 rounded-full ${creditPct > 80 ? 'bg-orange-500' : 'bg-brand-500'}`}
-                style={{ width: `${Math.min(100, creditPct)}%` }}
-              />
+
+            <h3 className="hz-label" style={{ marginBottom: '8px', color: 'var(--hz-muted)' }}>Included credits</h3>
+            <div className="mb-4">
+              <div className="flex justify-between hz-sm mb-1" style={{ color: 'var(--hz-muted)' }}>
+                <span>Used</span>
+                <span style={{ fontWeight: 500, color: 'var(--hz-ink)' }}>
+                  {usage?.credits_used ?? '—'} / {usage?.credits_included ?? '—'}
+                </span>
+              </div>
+              <div style={{ height: '6px', background: 'var(--hz-rule)', borderRadius: '4px', overflow: 'hidden' }}>
+                <div
+                  style={{
+                    height: '100%',
+                    borderRadius: '4px',
+                    width: `${Math.min(100, creditPct)}%`,
+                    background: barColor,
+                    transition: 'width 0.4s cubic-bezier(0.4,0,0.2,1)',
+                  }}
+                />
+              </div>
+              {(usage?.overage_credits ?? 0) > 0 && (
+                <p className="hz-sm mt-2" style={{ color: 'var(--hz-warn)' }}>
+                  {usage?.overage_credits} overage credits — est. ${usage?.estimated_overage_cost.toFixed(2)} on invoice
+                </p>
+              )}
             </div>
-            {(usage?.overage_credits ?? 0) > 0 && (
-              <p className="text-xs text-orange-600 dark:text-orange-400 mt-1">
-                {usage?.overage_credits} overage credits — estimated ${usage?.estimated_overage_cost.toFixed(2)} on
-                your invoice
-              </p>
+
+            {usage?.period_end && (
+              <p className="hz-sm" style={{ color: 'var(--hz-muted)' }}>Period ends {formatDate(usage.period_end)}</p>
+            )}
+
+            {currentPlan !== 'free' && (
+              <button
+                type="button"
+                onClick={() => portalMutation.mutate()}
+                disabled={portalMutation.isPending}
+                className="hz-btn hz-btn-outline w-full mt-4"
+                style={{ fontSize: '12px' }}
+              >
+                {portalMutation.isPending ? 'Opening…' : 'Manage subscription'}
+              </button>
             )}
           </div>
 
-          {usage?.period_end && (
-            <p className="text-xs text-gray-400 dark:text-gray-500">Period ends {formatDate(usage.period_end)}</p>
-          )}
-
-          {currentPlan !== 'free' && (
-            <button
-              type="button"
-              onClick={() => portalMutation.mutate()}
-              disabled={portalMutation.isPending}
-              className="mt-4 w-full py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 font-medium text-gray-700 dark:text-gray-300"
-            >
-              Manage subscription
-            </button>
-          )}
-        </div>
-
-        {/* B: Extra USD balance */}
-        <div className="bg-white dark:bg-gray-900 p-6 rounded-xl border border-gray-200 dark:border-gray-700">
-          <h2 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">Extra balance (USD)</h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-            Used after your monthly included credits run out in the current period, at your plan&apos;s per-credit
-            overage rate.
-          </p>
-          <p className="text-3xl font-semibold text-gray-900 dark:text-gray-100 mb-1">
-            {usage ? `$${extraUsd.toFixed(2)}` : '—'}
-          </p>
-          {usage && rate > 0 && (
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-              ≈ {approxExtraCredits} extra credits at ${rate.toFixed(2)}/credit
+          {/* Extra balance */}
+          <div style={{ ...cardShell, padding: '20px' }}>
+            <h2 className="hz-h2" style={{ fontSize: '14px', margin: '0 0 4px', color: 'var(--hz-ink)' }}>
+              Extra balance (USD)
+            </h2>
+            <p className="hz-sm mb-4" style={{ color: 'var(--hz-muted)', lineHeight: 1.5 }}>
+              Used after monthly included credits run out this period, at your plan&apos;s overage rate.
             </p>
-          )}
+            <p style={{ fontSize: '28px', fontWeight: 600, letterSpacing: '-0.03em', color: 'var(--hz-ink)', margin: '0 0 4px' }}>
+              {usage ? `$${extraUsd.toFixed(2)}` : '—'}
+            </p>
+            {usage && rate > 0 && (
+              <p className="hz-sm mb-4" style={{ color: 'var(--hz-muted)' }}>
+                ≈ {approxExtraCredits} extra credits at ${rate.toFixed(2)}/credit
+              </p>
+            )}
 
-          {isAdmin ? (
-            <div className="space-y-3">
-              <div className="flex flex-wrap gap-2">
-                {TOPUP_PRESETS.map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setTopupAmount(n)}
-                    className={`px-3 py-1.5 rounded-lg text-sm border ${
-                      topupAmount === n
-                        ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 text-brand-800 dark:text-brand-200'
-                        : 'border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300'
-                    }`}
-                  >
-                    ${n}
-                  </button>
-                ))}
+            {isAdmin ? (
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  {TOPUP_PRESETS.map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setTopupAmount(n)}
+                      className="hz-sm font-medium rounded-md px-3 py-1.5"
+                      style={{
+                        border: `1px solid ${topupAmount === n ? 'var(--hz-ink)' : 'var(--hz-rule)'}`,
+                        background: topupAmount === n ? 'var(--hz-bg3)' : 'transparent',
+                        color: topupAmount === n ? 'var(--hz-ink)' : 'var(--hz-muted)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ${n}
+                    </button>
+                  ))}
+                </div>
+                <label className="block hz-sm" style={{ color: 'var(--hz-muted)' }}>
+                  Amount (USD)
+                  <input
+                    type="number"
+                    min={5}
+                    max={500}
+                    step={1}
+                    value={topupAmount}
+                    onChange={(e) => setTopupAmount(Number(e.target.value))}
+                    className="hz-inp mt-1 w-full px-3 py-2 text-sm"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => topUpMutation.mutate(topupAmount)}
+                  disabled={topUpMutation.isPending || topupAmount < 5 || topupAmount > 500}
+                  className="hz-btn hz-btn-primary w-full disabled:opacity-50"
+                  style={{ fontSize: '13px' }}
+                >
+                  {topUpMutation.isPending ? 'Redirecting…' : 'Add balance'}
+                </button>
               </div>
-              <label className="block text-xs text-gray-500 dark:text-gray-400">
-                Amount (USD)
-                <input
-                  type="number"
-                  min={5}
-                  max={500}
-                  step={1}
-                  value={topupAmount}
-                  onChange={(e) => setTopupAmount(Number(e.target.value))}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
-                />
-              </label>
-              <button
-                type="button"
-                onClick={() => topUpMutation.mutate(topupAmount)}
-                disabled={topUpMutation.isPending || topupAmount < 5 || topupAmount > 500}
-                className="w-full py-2 text-sm bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-lg font-medium hover:bg-gray-700 dark:hover:bg-gray-300 disabled:opacity-50"
-              >
-                {topUpMutation.isPending ? 'Redirecting…' : 'Add balance'}
-              </button>
+            ) : (
+              <p className="hz-sm" style={{ color: 'var(--hz-muted)' }}>Only tenant admins can add balance.</p>
+            )}
+          </div>
+
+          {/* Upgrade */}
+          <div style={{ ...cardShell, padding: '20px' }}>
+            <h2 className="hz-h2" style={{ fontSize: '14px', margin: '0 0 12px', color: 'var(--hz-ink)' }}>Upgrade plan</h2>
+            <div className="space-y-2">
+              {PLANS.filter((p) => p.id !== currentPlan).map((plan) => (
+                <div
+                  key={plan.id}
+                  className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-md"
+                  style={{ border: '1px solid var(--hz-rule)', background: 'var(--hz-bg2)' }}
+                >
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--hz-ink)' }}>
+                      {plan.name} — {plan.price}
+                    </div>
+                    <div className="hz-sm" style={{ color: 'var(--hz-muted)' }}>
+                      {plan.credits} · {plan.overage} overage
+                    </div>
+                  </div>
+                  {isAdmin ? (
+                    <button
+                      type="button"
+                      onClick={() => checkoutMutation.mutate(plan.id)}
+                      disabled={checkoutMutation.isPending}
+                      className="hz-btn hz-btn-primary shrink-0 disabled:opacity-50"
+                      style={{ fontSize: '11px', padding: '6px 12px' }}
+                    >
+                      Upgrade
+                    </button>
+                  ) : (
+                    <span className="hz-sm" style={{ color: 'var(--hz-muted)' }}>Admin only</span>
+                  )}
+                </div>
+              ))}
             </div>
-          ) : (
-            <p className="text-xs text-gray-400 dark:text-gray-500">Only tenant admins can add balance.</p>
-          )}
+          </div>
         </div>
 
-        {/* C: Upgrade */}
-        <div className="bg-white dark:bg-gray-900 p-6 rounded-xl border border-gray-200 dark:border-gray-700">
-          <h2 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">Upgrade plan</h2>
-          <div className="space-y-3">
-            {PLANS.filter((p) => p.id !== currentPlan).map((plan) => (
+        {/* Billing history */}
+        <div style={cardShell}>
+          <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--hz-rule)', background: 'var(--hz-bg2)' }}>
+            <h2 className="hz-h2" style={{ fontSize: '14px', margin: 0, color: 'var(--hz-ink)' }}>Billing history</h2>
+          </div>
+          <div>
+            {hist?.map((e, ei) => (
               <div
-                key={plan.id}
-                className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-700 rounded-lg"
+                key={e.id}
+                className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 hz-sm"
+                style={{
+                  borderTop: ei > 0 ? '1px solid var(--hz-rule)' : undefined,
+                }}
               >
-                <div>
-                  <div className="font-medium text-sm text-gray-900 dark:text-gray-100">
-                    {plan.name} — {plan.price}
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {plan.credits} · {plan.overage} overage
-                  </div>
+                <div style={{ color: 'var(--hz-ink)', minWidth: 0 }}>
+                  <span style={{ fontWeight: 500 }}>
+                    {EVENT_LABELS[e.event_type] ?? e.event_type.replace(/_/g, ' ')}
+                  </span>
+                  {e.description && (
+                    <span style={{ color: 'var(--hz-muted)', marginLeft: '6px' }}>— {e.description}</span>
+                  )}
                 </div>
-                {isAdmin ? (
-                  <button
-                    type="button"
-                    onClick={() => checkoutMutation.mutate(plan.id)}
-                    disabled={checkoutMutation.isPending}
-                    className="px-3 py-1.5 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-lg text-xs font-medium hover:bg-gray-700 dark:hover:bg-gray-300 disabled:opacity-50"
-                  >
-                    Upgrade
-                  </button>
-                ) : (
-                  <span className="text-xs text-gray-400">Admin only</span>
-                )}
+                <div className="text-right shrink-0">
+                  {e.credits_delta !== 0 && (
+                    <span
+                      style={{
+                        color: e.credits_delta > 0 ? 'var(--hz-ok)' : 'var(--hz-crit)',
+                        fontWeight: 500,
+                      }}
+                    >
+                      {e.credits_delta > 0 ? '+' : ''}
+                      {e.credits_delta} credits
+                    </span>
+                  )}
+                  {e.usd_amount > 0 && (
+                    <span style={{ color: 'var(--hz-muted)', marginLeft: '8px' }}>${e.usd_amount.toFixed(2)}</span>
+                  )}
+                </div>
               </div>
             ))}
           </div>
-        </div>
-      </div>
-
-      {/* Billing history */}
-      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700">
-        <div className="p-5 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="font-semibold text-gray-900 dark:text-gray-100">Billing history</h2>
-        </div>
-        <div className="divide-y divide-gray-100 dark:divide-gray-800">
-          {(
-            history as Array<{
-              id: string
-              event_type: string
-              credits_delta: number
-              usd_amount: number
-              description: string
-              created_at: string
-            }>
-          )?.map((e) => (
-            <div key={e.id} className="flex items-center justify-between px-5 py-3 text-sm">
-              <div>
-                <span className="font-medium text-gray-900 dark:text-gray-100">
-                  {EVENT_LABELS[e.event_type] ?? e.event_type.replace(/_/g, ' ')}
-                </span>
-                {e.description && (
-                  <span className="text-gray-400 dark:text-gray-500 ml-2">— {e.description}</span>
-                )}
-              </div>
-              <div className="text-right">
-                {e.credits_delta !== 0 && (
-                  <span
-                    className={
-                      e.credits_delta > 0
-                        ? 'text-green-600 dark:text-green-400'
-                        : 'text-red-500 dark:text-red-400'
-                    }
-                  >
-                    {e.credits_delta > 0 ? '+' : ''}
-                    {e.credits_delta} credits
-                  </span>
-                )}
-                {e.usd_amount > 0 && (
-                  <span className="text-gray-500 dark:text-gray-400 ml-2">${e.usd_amount.toFixed(2)}</span>
-                )}
-              </div>
-            </div>
-          ))}
         </div>
       </div>
     </div>
@@ -317,7 +428,13 @@ function BillingContent() {
 
 export default function BillingPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-gray-400 dark:text-gray-500">Loading...</div>}>
+    <Suspense
+      fallback={(
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '200px', background: 'var(--hz-bg)' }}>
+          <span className="hz-cursor" style={{ opacity: 0.35 }} aria-hidden />
+        </div>
+      )}
+    >
       <BillingContent />
     </Suspense>
   )

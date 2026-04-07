@@ -36,7 +36,7 @@ export default function SignupPage() {
       setMustSelectTenant(loginData.must_select_tenant)
       setAuth(loginData.access_token, loginData.tenant_id, loginData.user_id, loginData.membership_role)
       if (typeof window !== 'undefined') {
-        localStorage.setItem('lumis_api_key', data.api_key)
+        localStorage.setItem('hz-api-key', data.api_key)
       }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail

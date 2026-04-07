@@ -1,6 +1,6 @@
 apiVersion: v2
 name: lumis
-description: AI-powered SRE observability platform
+description: AI-powered Reliability Engineering Platform
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
@@ -9,5 +9,5 @@ keywords:
   - observability
   - ai
 maintainers:
-  - name: Lumis Team
-    email: engineering@lumis.dev
+  - name: Horion Team
+    email: engineering@horion.pro

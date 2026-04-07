@@ -113,14 +113,64 @@ async def enqueue_analysis_from_webhook(
     return job
 
 
+def _derive_analysis_type(changed_files: list[str] | None, has_context: bool) -> str:
+    """Derive analysis type from scope when the caller does not specify one explicitly."""
+    norm = [p.strip() for p in (changed_files or []) if p and str(p).strip()]
+    if norm:
+        return "quick"
+    return "full" if has_context else "repository"
+
+
+async def estimate_analysis_cost(
+    session: AsyncSession,
+    tenant_id: str,
+    repo_id: str,
+    paths: list[str],
+    select_all: bool,
+) -> dict:
+    """
+    Return a lightweight credit / analysis-type estimate for a given scope selection.
+    No billing is performed — this is read-only.
+
+    Formula (paths provided, i.e. not select-all):
+      credits = min(15, max(1, 1 + len(paths) // 25))
+    For select-all, uses existing fixed costs based on whether context exists.
+    """
+    from apps.api.billing.billing_gate import ANALYSIS_COSTS
+
+    repo_result = await session.execute(
+        select(Repository).where(
+            Repository.id == uuid.UUID(repo_id),
+            Repository.tenant_id == uuid.UUID(tenant_id),
+            Repository.is_active == True,
+        )
+    )
+    repo = repo_result.scalar_one_or_none()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found or not active.")
+
+    has_context = bool(getattr(repo, "context_summary", None))
+
+    if select_all or not paths:
+        analysis_type = "full" if has_context else "repository"
+        estimated_credits = ANALYSIS_COSTS.get(analysis_type, 3)
+        return {"file_count": 0, "estimated_credits": estimated_credits, "analysis_type": analysis_type}
+
+    path_count = len([p.strip() for p in paths if p and str(p).strip()])
+    analysis_type = "quick"
+    estimated_credits = min(15, max(1, 1 + path_count // 25))
+    return {"file_count": path_count, "estimated_credits": estimated_credits, "analysis_type": analysis_type}
+
+
 async def enqueue_manual_analysis(
     session: AsyncSession,
     tenant_id: str,
     repo_id: str,
     ref: str,
-    analysis_type: str,
+    analysis_type: str | None,
     *,
     changed_files: list[str] | None = None,
+    llm_provider: str = "anthropic",
 ) -> AnalysisJob:
     """Enqueue a manual analysis triggered via API."""
     repo_result = await session.execute(
@@ -133,6 +183,11 @@ async def enqueue_manual_analysis(
     repo = repo_result.scalar_one_or_none()
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found or not active.")
+
+    # Derive type from scope when caller omits it (new UX: scope-first flow)
+    if not analysis_type:
+        has_context = bool(getattr(repo, "context_summary", None))
+        analysis_type = _derive_analysis_type(changed_files, has_context)
 
     if analysis_type == "quick":
         norm = [p.strip() for p in (changed_files or []) if p and str(p).strip()]
@@ -162,6 +217,7 @@ async def enqueue_manual_analysis(
         trigger="manual",
         branch_ref=ref,
         analysis_type=analysis_type,
+        llm_provider=llm_provider,
         credits_reserved=ANALYSIS_COSTS.get(analysis_type, 3),
         changed_files=files_payload,
         billing_reservation=billing_snapshot,

@@ -10,6 +10,7 @@ Also ingests curated static knowledge from workshop materials and internal docs.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import structlog
 
@@ -73,6 +74,13 @@ _DOC_EXPIRES_DAYS = 30
 # guides. This content is embedded directly (no HTTP fetch required).
 # Format: (source_id, pillar, content)
 # ---------------------------------------------------------------------------
+
+
+def _load_static_knowledge_md(name: str) -> str:
+    path = Path(__file__).resolve().parent.parent / "knowledge" / name
+    return path.read_text(encoding="utf-8")
+
+
 _STATIC_KNOWLEDGE: list[tuple[str, str, str]] = [
     (
         "terraform-iac-best-practices",
@@ -575,6 +583,11 @@ connected view of the transaction.
 - **High-cardinality labels**: Using user IDs or request IDs as metric label values.
 - **Trace noise**: Creating spans for every function call — only instrument meaningful boundaries.
 """,
+    ),
+    (
+        "otel-auto-vs-manual-instrumentation",
+        "traces",
+        _load_static_knowledge_md("otel_auto_vs_manual_instrumentation.md"),
     ),
 ]
 

@@ -133,10 +133,14 @@ async def context_discovery_node(state: AgentState) -> dict:
 
 
 async def _generate_summary(state: AgentState, context_files: dict[str, str]) -> str:
-    from anthropic import Anthropic
     from apps.agent.core.config import settings
+    from apps.agent.llm.chat_completion import chat_complete
 
-    client = Anthropic(api_key=settings.anthropic_api_key)
+    provider = state.get("request", {}).get("llm_provider", "anthropic")
+    if provider == "cerebra_ai":
+        model = settings.cerebra_ai_model_triage
+    else:
+        model = settings.anthropic_model_triage
 
     files_section = "\n\n".join(
         f"### {name}\n```\n{content}\n```"
@@ -146,7 +150,8 @@ async def _generate_summary(state: AgentState, context_files: dict[str, str]) ->
     request = state.get("request", {})
     repo_full_name = request.get("repo_full_name", "unknown")
 
-    prompt = f"""Read the files below and write a single short paragraph (2-4 sentences) describing what this repository does.
+    system = "You are a concise technical writer. Respond with plain text only, no markdown."
+    user_prompt = f"""Read the files below and write a single short paragraph (2-4 sentences) describing what this repository does.
 Focus only on: what the service/project does, what language/framework it uses, and what type it is (API, worker, IaC, library, etc.).
 Do not include headings, bullet points, or markdown. Plain text only. Do not invent details not present in the files.
 
@@ -155,13 +160,20 @@ Repository: {repo_full_name}
 Key files:
 {files_section if files_section else "(no key files found — use the repo name as a hint)"}"""
 
-    message = client.messages.create(
-        model=settings.anthropic_model_triage,  # use fast/cheap model
+    resp = await chat_complete(
+        system=system,
+        user=user_prompt,
+        model=model,
         max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
+        provider=provider,
+        base_url=settings.cerebra_ai_base_url,
+        api_key=settings.anthropic_api_key if provider == "anthropic" else settings.cerebra_ai_api_key,
+        temperature=settings.cerebra_ai_temperature if provider == "cerebra_ai" else 0.3,
+        top_p=settings.cerebra_ai_top_p if provider == "cerebra_ai" else 0.9,
+        timeout=settings.cerebra_ai_timeout if provider == "cerebra_ai" else 120,
     )
 
-    return message.content[0].text
+    return resp.text
 
 
 async def _save_context_summary(job_id: str, tenant_id: str, summary: str | None, detected_languages: list[str]) -> None:

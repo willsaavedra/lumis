@@ -41,11 +41,11 @@ shell-db:
 # ── Database ─────────────────────────────────────────────────────────────────
 
 migrate:
-	docker compose exec api alembic upgrade head
+	docker compose exec api alembic -c apps/api/alembic.ini upgrade head
 
 migration:
 	@if [ -z "$(name)" ]; then echo "Usage: make migration name=<description>"; exit 1; fi
-	docker compose exec api alembic revision --autogenerate -m "$(name)"
+	docker compose exec api alembic -c apps/api/alembic.ini revision --autogenerate -m "$(name)"
 
 seed:
 	docker compose exec api python scripts/seed.py

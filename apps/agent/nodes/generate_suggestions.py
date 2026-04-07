@@ -5,7 +5,7 @@ import json
 import time
 import structlog
 
-from apps.agent.nodes.base import publish_progress, log_llm_call
+from apps.agent.nodes.base import publish_progress, publish_llm_call_started, log_llm_call
 from apps.agent.nodes.instrumentation_hints import constraint_section
 from apps.agent.schemas import AgentState
 
@@ -38,6 +38,13 @@ async def generate_suggestions_node(state: AgentState) -> dict:
     findings = state.get("findings", [])
 
     if cap == 0:
+        log.info(
+            "suggestion_skipped",
+            reason="quick_type",
+            analysis_type=analysis_type,
+            findings_count=len(findings),
+            job_id=state.get("job_id"),
+        )
         await publish_progress(state, "generating", 88, "Suggestions skipped for quick analysis.")
         return {"findings": findings}
 
@@ -49,6 +56,12 @@ async def generate_suggestions_node(state: AgentState) -> dict:
     ]
 
     if not actionable:
+        log.info(
+            "suggestion_skipped",
+            reason="no_actionable_findings",
+            total_findings=len(findings),
+            job_id=state.get("job_id"),
+        )
         await publish_progress(state, "generating", 88, "Suggestions complete.")
         return {"findings": findings}
 
@@ -109,10 +122,14 @@ async def _generate_batch_suggestions(
         "code_after":  str | None, # corrected version of those exact lines
       }
     """
-    from anthropic import Anthropic
     from apps.agent.core.config import settings
+    from apps.agent.llm.chat_completion import chat_complete
 
-    client = Anthropic(api_key=settings.anthropic_api_key)
+    provider = state.get("request", {}).get("llm_provider", "anthropic")
+    if provider == "cerebra_ai":
+        llm_model = settings.cerebra_ai_model_primary
+    else:
+        llm_model = settings.anthropic_model_primary
 
     # Determine primary language from the batch
     lang = "python"
@@ -195,11 +212,7 @@ async def _generate_batch_suggestions(
 
     findings_text = json.dumps(findings_with_context, indent=2)
 
-    t0 = time.monotonic()
-    message = client.messages.create(
-        model=settings.anthropic_model_primary,
-        max_tokens=4000,
-        system=f"""You are an expert SRE generating targeted observability fixes in {lang}.
+    system_prompt = f"""You are an expert SRE generating targeted observability fixes in {lang}.
 {sdk_constraint}
 
 Rules:
@@ -209,10 +222,9 @@ Rules:
 - code_after: the corrected replacement for those exact lines, using the same indentation.
   If additive, show only the new lines to add.
 - suggestion: one sentence explaining what to change and why.
-- Be concise. Include only syntactically correct {lang} code.""",
-        messages=[{
-            "role": "user",
-            "content": f"""Generate a targeted fix for each finding below.
+- Be concise. Include only syntactically correct {lang} code."""
+
+    user_prompt = f"""Generate a targeted fix for each finding below.
 
 Return a JSON array — one object per finding, same order:
 [
@@ -227,15 +239,33 @@ Return a JSON array — one object per finding, same order:
 Findings (with surrounding context and candidate lines):
 {findings_text}
 
-Return ONLY the JSON array, no markdown fences.""",
-        }],
+Return ONLY the JSON array, no markdown fences."""
+
+    await publish_llm_call_started(
+        state,
+        "generate_suggestions",
+        llm_model,
+        detail=f"Suggestions for {len(findings)} finding(s)",
+    )
+    t0 = time.monotonic()
+    resp = await chat_complete(
+        system=system_prompt,
+        user=user_prompt,
+        model=llm_model,
+        max_tokens=4000,
+        provider=provider,
+        base_url=settings.cerebra_ai_base_url,
+        api_key=settings.anthropic_api_key if provider == "anthropic" else settings.cerebra_ai_api_key,
+        temperature=settings.cerebra_ai_temperature if provider == "cerebra_ai" else 0.3,
+        top_p=settings.cerebra_ai_top_p if provider == "cerebra_ai" else 0.9,
+        timeout=settings.cerebra_ai_timeout if provider == "cerebra_ai" else 120,
     )
     latency_ms = (time.monotonic() - t0) * 1000
 
     fallback = {"suggestion": "See documentation for instrumentation guidance.", "code_before": None, "code_after": None}
     results: list[dict] = []
     try:
-        raw = message.content[0].text.strip()
+        raw = resp.text.strip()
         if "```" in raw:
             raw = raw.split("```")[1]
             if raw.startswith("json"):
@@ -253,15 +283,25 @@ Return ONLY the JSON array, no markdown fences.""",
     except Exception:
         results = [fallback] * len(findings)
 
-    log_llm_call(
+    await log_llm_call(
         state=state,
         node="generate_suggestions",
-        model=settings.anthropic_model_primary,
-        input_tokens=message.usage.input_tokens,
-        output_tokens=message.usage.output_tokens,
+        model=llm_model,
+        input_tokens=resp.input_tokens,
+        output_tokens=resp.output_tokens,
         latency_ms=latency_ms,
         findings_count=len(findings),
         prompt_version=PROMPT_VERSION,
+    )
+    log.info(
+        "suggestion_generated",
+        model=llm_model,
+        provider=provider,
+        findings_count=len(findings),
+        input_tokens=resp.input_tokens,
+        output_tokens=resp.output_tokens,
+        latency_ms=round(latency_ms),
+        job_id=state.get("job_id"),
     )
 
     return results

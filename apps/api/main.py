@@ -18,7 +18,7 @@ log = structlog.get_logger(__name__)
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Lumis API",
-        description="AI-powered SRE observability platform",
+        description="AI-powered Reliability Engineering Platform",
         version="0.1.0",
         docs_url="/docs" if settings.debug else None,
         redoc_url="/redoc" if settings.debug else None,

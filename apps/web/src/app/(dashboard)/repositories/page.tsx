@@ -4,14 +4,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { reposApi, analysesApi, Repository, connectionsApi, type ScmConnection } from '@/lib/api'
 import { RepoWebLink } from '@/components/RepoWebLink'
 import { ScmLogo } from '@/components/ScmLogo'
-import { LanguageLogo } from '@/components/LanguageLogo'
-import { ObsBackendLogo } from '@/components/ObsBackendLogo'
 import { formatDate } from '@/lib/utils'
 import { useState, useRef, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ExternalLink, Search } from 'lucide-react'
-import { RepoContentsPicker, resolveScopeAnalysisType, type ScopeItem } from '@/components/RepoContentsPicker'
+import { RepoContentsPicker, type ScopeItem } from '@/components/RepoContentsPicker'
 import { toast } from '@/components/Toast'
 
 const REPO_TYPES = [
@@ -97,6 +95,69 @@ function buildObsMetadata(form: ContextForm): Record<string, unknown> | undefine
   return Object.keys(meta).length > 0 ? meta : undefined
 }
 
+function repoTypeShortLabel(repo: Repository): string | null {
+  if (!repo.repo_type) return null
+  if (repo.repo_type === 'app' && repo.app_subtype) {
+    return `App · ${repo.app_subtype.replace(/_/g, ' ')}`
+  }
+  if (repo.repo_type === 'iac' && repo.iac_provider) {
+    return `IaC · ${repo.iac_provider.toUpperCase()}`
+  }
+  const t = REPO_TYPES.find((x) => x.value === repo.repo_type)
+  return t?.label ?? repo.repo_type
+}
+
+/** Full-width context block: no hard ellipsis; long text can expand. */
+function RepoContextSummary({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const isLong = text.length > 260 || text.split(/\n/).length > 5
+
+  return (
+    <div
+      style={{
+        marginTop: '14px',
+        paddingTop: '14px',
+        borderTop: '1px solid var(--hz-rule)',
+      }}
+    >
+      <div className="hz-label" style={{ marginBottom: '6px', color: 'var(--hz-muted)' }}>
+        Context
+      </div>
+      <p
+        className={!expanded && isLong ? 'line-clamp-4' : ''}
+        style={{
+          margin: 0,
+          fontSize: '12px',
+          lineHeight: 1.65,
+          color: 'var(--hz-ink2)',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        {text}
+      </p>
+      {isLong && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="hz-sm mt-2"
+          style={{
+            color: 'var(--hz-ink)',
+            background: 'transparent',
+            border: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            textDecoration: 'underline',
+            textUnderlineOffset: '3px',
+          }}
+        >
+          {expanded ? 'Show less' : 'Show full context'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 function repoToContextForm(repo: Repository): ContextForm {
   const meta = (repo.obs_metadata ?? {}) as Record<string, unknown>
   const kvSource = (meta.tags ?? meta.labels ?? {}) as Record<string, string>
@@ -167,9 +228,12 @@ export default function RepositoriesPage() {
   const [context, setContext] = useState<ContextForm>(EMPTY_CONTEXT)
   const [analyzingId, setAnalyzingId] = useState<string | null>(null)
   const [analyzeModal, setAnalyzeModal] = useState<{ repo: Repository } | null>(null)
-  const [analyzeType, setAnalyzeType] = useState<'quick' | 'full' | 'repository'>('full')
+  const [selectAll, setSelectAll] = useState(true)
+  const [selectedProvider, setSelectedProvider] = useState<'anthropic' | 'cerebra_ai'>('anthropic')
   const [analyzeBranch, setAnalyzeBranch] = useState('')
   const [quickScope, setQuickScope] = useState<ScopeItem[]>([])
+  const [estimate, setEstimate] = useState<{ file_count: number; estimated_credits: number; analysis_type: string } | null>(null)
+  const [estimating, setEstimating] = useState(false)
   const [editingContextId, setEditingContextId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState<ContextForm>(EMPTY_CONTEXT)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
@@ -178,6 +242,26 @@ export default function RepositoriesPage() {
   const [addRepoScmChoice, setAddRepoScmChoice] = useState<ScmChoiceId | null>(null)
   const [addRepoSearch, setAddRepoSearch] = useState('')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Debounced credit estimate when the analyze modal is open
+  useEffect(() => {
+    if (!analyzeModal) return
+    const repoId = analyzeModal.repo.id
+    const paths = selectAll ? null : quickScope.map((s) => s.path)
+    const ref = analyzeBranch.trim() || analyzeModal.repo.default_branch
+    const timer = setTimeout(async () => {
+      setEstimating(true)
+      try {
+        const result = await analysesApi.estimate(repoId, paths, selectAll, ref)
+        setEstimate(result)
+      } catch {
+        setEstimate(null)
+      } finally {
+        setEstimating(false)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [analyzeModal, selectAll, quickScope, analyzeBranch])
 
   // Poll context discovery job until complete
   useEffect(() => {
@@ -312,17 +396,18 @@ export default function RepositoriesPage() {
     mutationFn: async (payload: {
       repoId: string
       ref: string
-      type: string
       changedFiles?: string[] | null
+      llmProvider?: 'anthropic' | 'cerebra_ai'
     }) => {
       setAnalyzingId(payload.repoId)
-      return analysesApi.trigger(payload.repoId, payload.ref, payload.type, payload.changedFiles ?? null)
+      return analysesApi.trigger(payload.repoId, payload.ref, undefined, payload.changedFiles ?? null, payload.llmProvider)
     },
     onSuccess: (data) => {
       toast('Analysis started — results will appear in Analyses', 'success')
       setAnalyzingId(null)
       setAnalyzeModal(null)
       setQuickScope([])
+      setEstimate(null)
       router.push(`/analyses/${data.id}`)
     },
     onError: (err: any) => {
@@ -343,20 +428,21 @@ export default function RepositoriesPage() {
 
   function openAnalyzeModal(repo: Repository) {
     setAnalyzeModal({ repo })
-    setAnalyzeType('full')
+    setSelectAll(true)
+    setSelectedProvider('anthropic')
     setAnalyzeBranch(repo.default_branch)
     setQuickScope([])
+    setEstimate(null)
   }
 
   function submitAnalyze() {
     if (!analyzeModal) return
-    if (analyzeType === 'quick' && quickScope.length === 0) return
-    const resolved = resolveScopeAnalysisType(analyzeType, quickScope)
+    if (!selectAll && quickScope.length === 0) return
     triggerMutation.mutate({
       repoId: analyzeModal.repo.id,
       ref: analyzeBranch.trim() || analyzeModal.repo.default_branch,
-      type: resolved.analysisType,
-      changedFiles: resolved.changedFiles,
+      changedFiles: selectAll ? null : quickScope.map((s) => s.path),
+      llmProvider: selectedProvider,
     })
   }
 
@@ -401,38 +487,114 @@ export default function RepositoriesPage() {
     })
   }
 
+  const repoCount = repos?.length ?? 0
+  const withSummary = repos?.filter((r) => (r.context_summary ?? '').trim().length > 0).length ?? 0
+
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-6">
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', background: 'var(--hz-bg)' }}>
+      {/* Topbar */}
+      <div
+        style={{
+          padding: '18px 24px 16px',
+          borderBottom: '1px solid var(--hz-rule)',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'flex-end',
+          justifyContent: 'space-between',
+          gap: '12px',
+        }}
+      >
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Repositories</h1>
-          <p className="text-gray-500 dark:text-gray-400">Manage repositories for analysis</p>
+          <h1 className="hz-h2" style={{ margin: 0, color: 'var(--hz-ink)' }}>Repositories</h1>
+          <p className="hz-body" style={{ marginTop: '6px', marginBottom: 0, fontSize: '12px', color: 'var(--hz-muted)' }}>
+            Connect repos and manage context for analyses
+          </p>
         </div>
-        <button
-          onClick={openAdd}
-          className="px-4 py-2 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-lg text-sm font-medium hover:bg-gray-700 dark:hover:bg-gray-300"
-        >
+        <button type="button" onClick={openAdd} className="hz-btn hz-btn-primary">
           + Add repository
         </button>
       </div>
 
+      {/* Mini stats */}
+      <div
+        className="grid grid-cols-1 sm:grid-cols-3 gap-px"
+        style={{ borderBottom: '1px solid var(--hz-rule)', background: 'var(--hz-rule)' }}
+      >
+        {[
+          { label: 'Connected repos', value: repoCount, sub: 'active in workspace', accent: 'var(--hz-ink)' },
+          { label: 'With context summary', value: withSummary, sub: 'of ' + repoCount, accent: 'var(--hz-info)' },
+          {
+            label: 'SCM connections',
+            value: connectedScmTypes.length || '—',
+            sub: 'Git host(s) linked',
+            accent: 'var(--hz-ok)',
+          },
+        ].map((s, i) => (
+          <div
+            key={i}
+            style={{
+              padding: '12px 20px',
+              position: 'relative',
+              overflow: 'hidden',
+              background: 'var(--hz-bg)',
+            }}
+          >
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: s.accent }} />
+            <div className="hz-grid-bg" style={{ position: 'absolute', inset: 0, opacity: 0.45, pointerEvents: 'none' }} />
+            <div className="hz-label" style={{ marginBottom: '4px', position: 'relative', color: 'var(--hz-muted)' }}>
+              {s.label}
+            </div>
+            <div
+              style={{
+                fontSize: '20px',
+                fontWeight: 700,
+                letterSpacing: '-0.04em',
+                color: 'var(--hz-ink)',
+                lineHeight: 1,
+                position: 'relative',
+              }}
+            >
+              {s.value}
+            </div>
+            <div className="hz-sm" style={{ marginTop: '3px', position: 'relative' }}>
+              {s.sub}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ flex: 1, padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
       {/* Repo list */}
-      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800">
+      <div
+        style={{
+          border: '1px solid var(--hz-rule)',
+          borderRadius: 'var(--hz-lg)',
+          overflow: 'hidden',
+          background: 'var(--hz-bg)',
+        }}
+      >
         {repos?.length === 0 && (
-          <div className="p-8 text-center text-gray-400 dark:text-gray-500 text-sm">
-            No repositories yet. Connect GitHub to get started.
+          <div className="hz-body" style={{ padding: '40px', textAlign: 'center', color: 'var(--hz-muted)' }}>
+            No repositories yet. Connect a Git host in Settings → Connections, then add a repository.
           </div>
         )}
-        {repos?.map((repo) => (
-          <div key={repo.id} className="p-4">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 min-w-0">
-                <ScmLogo scm={repo.scm_type} className="h-6 w-6 shrink-0" />
-                <div className="min-w-0">
-                  <div className="font-medium text-gray-900 dark:text-gray-100 text-sm truncate flex items-center gap-2">
+        {repos?.map((repo, ri) => (
+          <div
+            key={repo.id}
+            style={{
+              borderTop: ri > 0 ? '1px solid var(--hz-rule)' : 'none',
+              padding: '18px 20px',
+            }}
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start gap-3 min-w-0 flex-1">
+                <ScmLogo scm={repo.scm_type} className="h-7 w-7 shrink-0 mt-0.5" />
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                     <Link
                       href={`/repositories/${repo.id}`}
-                      className="truncate hover:underline text-gray-900 dark:text-gray-100"
+                      className="truncate hz-body hover:underline"
+                      style={{ color: 'var(--hz-ink)', fontWeight: 600, fontSize: '14px' }}
                     >
                       {repo.full_name}
                     </Link>
@@ -441,58 +603,55 @@ export default function RepositoriesPage() {
                       target="_blank"
                       rel="noopener noreferrer"
                       title="Open on Git host"
-                      className="shrink-0 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400"
+                      style={{ color: 'var(--hz-muted)' }}
+                      className="shrink-0 hover:opacity-80 inline-flex"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <ExternalLink className="h-3.5 w-3.5" aria-hidden />
                     </a>
                     {contextDiscoveryRepoId === repo.id && (
-                      <span className="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500 font-normal">
-                        <span className="w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin" />
-                        analyzing context...
+                      <span className="flex items-center gap-1 hz-sm font-normal" style={{ color: 'var(--hz-muted)' }}>
+                        <span
+                          className="inline-block w-3 h-3 rounded-full animate-spin shrink-0"
+                          style={{ border: '2px solid var(--hz-rule2)', borderTopColor: 'transparent' }}
+                        />
+                        analyzing context…
                       </span>
                     )}
                   </div>
-                  <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
-                    <span>{repo.default_branch}</span>
-                    <span>·</span>
-                    <span>added {formatDate(repo.created_at)}</span>
+                  <p className="hz-sm m-0" style={{ color: 'var(--hz-muted)', lineHeight: 1.55 }}>
+                    {repo.default_branch}
+                    <span aria-hidden> · </span>
+                    added {formatDate(repo.created_at)}
                     {repo.last_analysis_at && (
                       <>
-                        <span>·</span>
-                        <span>last analysis {formatDate(repo.last_analysis_at)}</span>
+                        <span aria-hidden> · </span>
+                        last analysis {formatDate(repo.last_analysis_at)}
                       </>
                     )}
-                    {repo.repo_type && (
-                      <>
-                        <span>·</span>
-                        <span className="capitalize">
-                          {repo.repo_type === 'app' && repo.app_subtype
-                            ? `app / ${repo.app_subtype.replace('_', ' ')}`
-                            : repo.repo_type === 'iac' && repo.iac_provider
-                            ? `iac / ${repo.iac_provider.toUpperCase()}`
-                            : repo.repo_type}
-                        </span>
-                      </>
-                    )}
-                    {repo.language && repo.language.length > 0 && (
-                      <>
-                        <span>·</span>
-                        {repo.language.map((lang) => (
-                          <span key={lang} className="flex items-center gap-1">
-                            <LanguageLogo language={lang} />{lang}
-                          </span>
-                        ))}
-                      </>
-                    )}
-                    {repo.observability_backend && (
-                      <><span>·</span><ObsBackendLogo backend={repo.observability_backend} /><span className="capitalize">{repo.observability_backend}</span></>
-                    )}
-                  </div>
+                    {(() => {
+                      const bits: string[] = []
+                      const rt = repoTypeShortLabel(repo)
+                      if (rt) bits.push(rt)
+                      if (repo.language && repo.language.length > 0) bits.push(repo.language.join(', '))
+                      if (repo.observability_backend) {
+                        const ob = OBS_BACKENDS.find((b) => b.value === repo.observability_backend)
+                        bits.push(ob?.label ?? repo.observability_backend)
+                      }
+                      if (bits.length === 0) return null
+                      return (
+                        <>
+                          <span aria-hidden> · </span>
+                          {bits.join(' · ')}
+                        </>
+                      )
+                    })()}
+                  </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2 shrink-0 sm:pt-0.5 sm:justify-end">
                 <button
+                  type="button"
                   onClick={() => {
                     if (editingContextId === repo.id) {
                       setEditingContextId(null)
@@ -502,22 +661,35 @@ export default function RepositoriesPage() {
                       setConfirmDeleteId(null)
                     }
                   }}
-                  className="px-3 py-1.5 text-xs border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 font-medium"
+                  className="hz-btn hz-btn-outline"
+                  style={{ fontSize: '11px', padding: '6px 12px' }}
                 >
                   Edit context
                 </button>
                 <button
+                  type="button"
                   onClick={() => openAnalyzeModal(repo)}
                   disabled={analyzingId === repo.id}
-                  className="px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 font-medium disabled:opacity-50 flex items-center gap-1.5"
+                  className="hz-btn hz-btn-primary"
+                  style={{ fontSize: '11px', padding: '6px 12px' }}
                 >
                   {analyzingId === repo.id ? (
-                    <><span className="w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin" />Analyzing...</>
-                  ) : 'Analyze now'}
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className="inline-block w-3 h-3 rounded-full animate-spin shrink-0"
+                        style={{ border: '2px solid var(--hz-bg)', borderTopColor: 'transparent' }}
+                      />
+                      Analyzing…
+                    </span>
+                  ) : (
+                    'Analyze now'
+                  )}
                 </button>
                 <button
+                  type="button"
                   onClick={() => { setConfirmDeleteId(repo.id); setEditingContextId(null) }}
-                  className="px-2 py-1.5 text-xs text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800"
+                  className="hz-btn hz-btn-ghost"
+                  style={{ fontSize: '11px', padding: '6px 10px', color: 'var(--hz-muted)' }}
                   title="Remove repository"
                 >
                   ✕
@@ -525,16 +697,20 @@ export default function RepositoriesPage() {
               </div>
             </div>
 
-            {/* Context summary — inline view */}
+            {/* Context summary — full text or expand; hz tokens only */}
             {repo.context_summary && editingContextId !== repo.id && (
-              <div className="mt-3 ml-9 text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-2 leading-relaxed line-clamp-2">
-                {repo.context_summary}
-              </div>
+              <RepoContextSummary text={repo.context_summary} />
             )}
 
             {/* Full context edit panel */}
             {editingContextId === repo.id && (
-              <div className="mt-3 ml-9 border border-gray-200 dark:border-gray-700 rounded-xl p-4 space-y-4 bg-gray-50 dark:bg-gray-800/50">
+              <div
+                className="mt-4 pt-4 space-y-4 rounded-lg p-4"
+                style={{
+                  border: '1px solid var(--hz-rule)',
+                  background: 'var(--hz-bg2)',
+                }}
+              >
                 {/* Repo type */}
                 <div>
                   <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">Repository type</label>
@@ -785,6 +961,7 @@ export default function RepositoriesPage() {
           </div>
         ))}
       </div>
+      </div>
 
       {/* Analyze now modal — wide layout, scroll body, sticky actions */}
       {analyzeModal && (
@@ -816,6 +993,8 @@ export default function RepositoriesPage() {
                 onClick={() => {
                   setAnalyzeModal(null)
                   setQuickScope([])
+                  setSelectAll(true)
+                  setEstimate(null)
                 }}
                 className="shrink-0 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-2xl leading-none w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
                 aria-label="Close"
@@ -826,168 +1005,113 @@ export default function RepositoriesPage() {
 
             <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6 py-4 sm:py-5">
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 xl:gap-10">
-                <div className="lg:col-span-7 space-y-5 min-w-0">
-              {/* Comparison table — explicit differences */}
-              <details
-                open
-                className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-800/40 overflow-hidden"
-              >
-                <summary className="cursor-pointer list-none px-3 py-2.5 text-xs font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2 marker:content-none">
-                  <span className="text-gray-400 dark:text-gray-500 select-none" aria-hidden>
-                    ▾
-                  </span>
-                  <span>Compare analysis types</span>
-                </summary>
-                <div className="overflow-x-auto border-t border-gray-200 dark:border-gray-700 px-2 pb-2 -mx-0">
-                  <table className="w-full text-[10px] sm:text-xs md:text-sm text-left border-collapse table-fixed min-w-0">
-                    <thead>
-                      <tr className="border-b border-gray-200 dark:border-gray-600">
-                        <th className="py-2 pr-2 font-medium text-gray-500 dark:text-gray-400 align-bottom w-[22%] min-w-[6rem]" />
-                        <th className="py-2 px-1.5 font-semibold text-gray-900 dark:text-gray-100 align-bottom w-[26%]">
-                          Quick
-                        </th>
-                        <th className="py-2 px-1.5 font-semibold text-gray-900 dark:text-gray-100 align-bottom w-[26%]">
-                          Full
-                        </th>
-                        <th className="py-2 pl-1.5 font-semibold text-gray-900 dark:text-gray-100 align-bottom w-[26%]">
-                          Repository
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-gray-700 dark:text-gray-300 [&_td]:break-words">
-                      <tr className="border-b border-gray-100 dark:border-gray-700/80">
-                        <td className="py-1.5 pr-2 font-medium text-gray-600 dark:text-gray-400">Path scope</td>
-                        <td className="py-1.5 px-1.5 align-top">Required — only files/folders you select</td>
-                        <td className="py-1.5 px-1.5 align-top">Optional — empty = whole clone</td>
-                        <td className="py-1.5 pl-1.5 align-top">Optional — empty = deep scan of the codebase</td>
-                      </tr>
-                      <tr className="border-b border-gray-100 dark:border-gray-700/80">
-                        <td className="py-1.5 pr-2 font-medium text-gray-600 dark:text-gray-400">Files considered</td>
-                        <td className="py-1.5 px-1.5 align-top">Expanded selection only (fast pass)</td>
-                        <td className="py-1.5 px-1.5 align-top">Repo walk, breadth-capped</td>
-                        <td className="py-1.5 pl-1.5 align-top">
-                          Large set — prioritizes <code className="font-mono text-[9px]">src/</code>,{' '}
-                          <code className="font-mono text-[9px]">cmd/</code>, app dirs, then rest
-                        </td>
-                      </tr>
-                      <tr className="border-b border-gray-100 dark:border-gray-700/80">
-                        <td className="py-1.5 pr-2 font-medium text-gray-600 dark:text-gray-400">Pipeline</td>
-                        <td className="py-1.5 px-1.5 align-top">Skips AST, Datadog pull &amp; RAG — goes straight to coverage LLM</td>
-                        <td className="py-1.5 px-1.5 align-top">AST → Datadog → RAG → coverage → efficiency</td>
-                        <td className="py-1.5 pl-1.5 align-top">Same full pipeline as Full, on many more files</td>
-                      </tr>
-                      <tr className="border-b border-gray-100 dark:border-gray-700/80">
-                        <td className="py-1.5 pr-2 font-medium text-gray-600 dark:text-gray-400">Coverage model</td>
-                        <td className="py-1.5 px-1.5 align-top">Triage / cheaper model, batched</td>
-                        <td className="py-1.5 px-1.5 align-top">Primary model</td>
-                        <td className="py-1.5 pl-1.5 align-top">Primary model, many batches</td>
-                      </tr>
-                      <tr>
-                        <td className="py-1.5 pr-2 font-medium text-gray-600 dark:text-gray-400">Credits</td>
-                        <td className="py-1.5 px-1.5 align-top">1</td>
-                        <td className="py-1.5 px-1.5 align-top">3</td>
-                        <td className="py-1.5 pl-1.5 align-top">15</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </details>
 
-              {/* Analysis type */}
-              <div>
-                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">
-                  Analysis type
-                </label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                  {([
-                    {
-                      value: 'quick',
-                      label: 'Quick',
-                      desc: 'Targeted pass on your selection only — cheapest, no AST/RAG',
-                      credits: 1,
-                    },
-                    {
-                      value: 'full',
-                      label: 'Full',
-                      desc: 'Standard PR-style analysis — full graph, context and efficiency',
-                      credits: 3,
-                    },
-                    {
-                      value: 'repository',
-                      label: 'Repository',
-                      desc: 'Widest file set — best for org-wide instrumentation audit',
-                      credits: 15,
-                    },
-                  ] as const).map((t) => (
+                {/* Left column — scope selector */}
+                <div className="lg:col-span-7 space-y-5 min-w-0">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-3">
+                      Scope
+                    </label>
+
+                    {/* Select-all toggle */}
                     <button
-                      key={t.value}
                       type="button"
-                      onClick={() => setAnalyzeType(t.value)}
-                      className={`w-full min-h-[5.5rem] md:min-h-[9rem] flex flex-col text-left px-3 py-2.5 rounded-lg border text-xs transition-colors ${
-                        analyzeType === t.value
+                      onClick={() => { setSelectAll(true); setQuickScope([]) }}
+                      className={`w-full flex items-start gap-3 px-4 py-3 rounded-lg border text-left text-xs transition-colors mb-2 ${
+                        selectAll
                           ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 ring-1 ring-gray-900/10 dark:ring-white/10'
                           : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-1 w-full">
-                        <span className="font-medium">{t.label}</span>
-                        <span className="shrink-0 text-[10px] text-gray-400 dark:text-gray-500">
-                          {t.credits} cr
-                        </span>
+                      <span className={`mt-0.5 w-3.5 h-3.5 rounded-full border-2 shrink-0 flex items-center justify-center ${
+                        selectAll ? 'border-gray-900 dark:border-gray-100 bg-gray-900 dark:bg-gray-100' : 'border-gray-300 dark:border-gray-600'
+                      }`}>
+                        {selectAll && <span className="w-1.5 h-1.5 rounded-full bg-white dark:bg-gray-900" />}
+                      </span>
+                      <div>
+                        <div className="font-medium">Analyze all files</div>
+                        <div className="text-gray-400 dark:text-gray-500 mt-0.5 leading-snug">
+                          Full repo scan — type is chosen automatically based on existing context.
+                        </div>
                       </div>
-                      <div className="text-gray-400 dark:text-gray-500 mt-1 leading-snug flex-1">{t.desc}</div>
                     </button>
-                  ))}
-                </div>
-              </div>
 
-              {/* Selected type — explicit recap */}
-              <div
-                className={`rounded-lg border px-3 py-2.5 text-[11px] leading-relaxed ${
-                  analyzeType === 'quick'
-                    ? 'border-blue-200 dark:border-blue-900/50 bg-blue-50/90 dark:bg-blue-950/25 text-blue-950 dark:text-blue-100/95'
-                    : analyzeType === 'full'
-                      ? 'border-violet-200 dark:border-violet-900/50 bg-violet-50/90 dark:bg-violet-950/25 text-violet-950 dark:text-violet-100/95'
-                      : 'border-amber-200 dark:border-amber-900/50 bg-amber-50/90 dark:bg-amber-950/25 text-amber-950 dark:text-amber-100/95'
-                }`}
-              >
-                <p className="font-semibold mb-1">
-                  {analyzeType === 'quick' && 'Quick — what will run'}
-                  {analyzeType === 'full' && 'Full — what will run'}
-                  {analyzeType === 'repository' && 'Repository — what will run'}
-                </p>
-                <ul className="list-disc pl-4 space-y-0.5 text-[11px] opacity-95">
-                  {analyzeType === 'quick' && (
-                    <>
-                      <li>Analysis is limited to the paths you select below (folders are expanded server-side).</li>
-                      <li>No call-graph / AST step, no Datadog metadata fetch, no RAG docs — faster feedback on specific code.</li>
-                      <li>Coverage findings use the triage model in small batches.</li>
-                    </>
+                    {/* Specific paths toggle */}
+                    <button
+                      type="button"
+                      onClick={() => setSelectAll(false)}
+                      className={`w-full flex items-start gap-3 px-4 py-3 rounded-lg border text-left text-xs transition-colors ${
+                        !selectAll
+                          ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 ring-1 ring-gray-900/10 dark:ring-white/10'
+                          : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
+                      }`}
+                    >
+                      <span className={`mt-0.5 w-3.5 h-3.5 rounded-full border-2 shrink-0 flex items-center justify-center ${
+                        !selectAll ? 'border-gray-900 dark:border-gray-100 bg-gray-900 dark:bg-gray-100' : 'border-gray-300 dark:border-gray-600'
+                      }`}>
+                        {!selectAll && <span className="w-1.5 h-1.5 rounded-full bg-white dark:bg-gray-900" />}
+                      </span>
+                      <div>
+                        <div className="font-medium">Select files or folders</div>
+                        <div className="text-gray-400 dark:text-gray-500 mt-0.5 leading-snug">
+                          Targeted pass on selected paths only — faster and cheaper.
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+
+                  {!selectAll && (
+                    <div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 leading-relaxed">
+                        Browse and pick one or more <strong>files</strong> or <strong>folders</strong>. Folders are expanded server-side.
+                      </p>
+                      <RepoContentsPicker
+                        repoId={analyzeModal.repo.id}
+                        refName={analyzeBranch.trim() || analyzeModal.repo.default_branch}
+                        selection={quickScope}
+                        onSelectionChange={setQuickScope}
+                        listMaxHeightClassName="max-h-[min(38vh,14rem)] sm:max-h-80 lg:max-h-[min(52vh,26rem)] xl:max-h-[28rem]"
+                      />
+                      {quickScope.length === 0 && (
+                        <p className="text-xs text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 rounded-lg px-3 py-2 mt-2">
+                          Select at least one file or folder to continue.
+                        </p>
+                      )}
+                    </div>
                   )}
-                  {analyzeType === 'full' && (
-                    <>
-                      <li>Clone the branch, walk the repo (or only paths if you set a scope).</li>
-                      <li>Builds AST / call graph, may pull Datadog signals, enriches with RAG, then coverage + efficiency scoring.</li>
-                      <li>Best default for ongoing PRs and full observability review.</li>
-                    </>
-                  )}
-                  {analyzeType === 'repository' && (
-                    <>
-                      <li>Deep scan: many files, ordered so application code (e.g. <code className="font-mono text-[10px] px-0.5 rounded bg-black/5 dark:bg-white/10">src/</code>) is seen first.</li>
-                      <li>Same rich pipeline as Full — expect higher LLM usage and longer runtime.</li>
-                      <li>Use for periodic org-wide or baseline instrumentation audits.</li>
-                    </>
-                  )}
-                </ul>
-              </div>
                 </div>
 
-                {/* Right column: branch + path scope — uses horizontal space on large screens */}
+                {/* Right column: LLM + branch */}
                 <div className="lg:col-span-5 space-y-5 min-w-0 lg:border-l lg:border-gray-200 dark:lg:border-gray-700 lg:pl-6 xl:pl-8">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3">
                       Run configuration
                     </p>
+
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">
+                      LLM Model
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 mb-4">
+                      {([
+                        { value: 'anthropic' as const, label: 'Claude', desc: 'Anthropic Claude Sonnet / Haiku' },
+                        { value: 'cerebra_ai' as const, label: 'CerebraAI', desc: 'Qwen 3.5 35B (self-hosted)' },
+                      ]).map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setSelectedProvider(opt.value)}
+                          className={`flex flex-col text-left px-3 py-2.5 rounded-lg border text-xs transition-colors ${
+                            selectedProvider === opt.value
+                              ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 ring-1 ring-gray-900/10 dark:ring-white/10'
+                              : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
+                          }`}
+                        >
+                          <span className="font-medium">{opt.label}</span>
+                          <span className="text-gray-400 dark:text-gray-500 mt-0.5 leading-snug">{opt.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">
                       Branch / Tag
                     </label>
@@ -1023,44 +1147,25 @@ export default function RepositoriesPage() {
                     </select>
                   </div>
 
-                  {(analyzeType === 'quick' || analyzeType === 'full' || analyzeType === 'repository') && (
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">
-                        {analyzeType === 'quick' ? 'Scope (required)' : 'Path scope (optional)'}
-                      </label>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 leading-relaxed">
-                        {analyzeType === 'quick' && (
-                          <>
-                            Browse and select one or more <strong>files</strong> or <strong>folders</strong>. Analysis runs{' '}
-                            <strong>only</strong> on these paths (folders are expanded on the server).
-                          </>
-                        )}
-                        {analyzeType === 'full' && (
-                          <>
-                            Leave empty to analyze the <strong>entire</strong> cloned repository. Or select paths to focus the
-                            run.
-                          </>
-                        )}
-                        {analyzeType === 'repository' && (
-                          <>
-                            Leave empty for a <strong>deep</strong> scan of the codebase (walks app source trees like{' '}
-                            <code className="text-[10px] font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">src/</code>{' '}
-                            first, then the rest). Or select paths to narrow the scan.
-                          </>
-                        )}
-                      </p>
-                      <RepoContentsPicker
-                        repoId={analyzeModal.repo.id}
-                        refName={analyzeBranch.trim() || analyzeModal.repo.default_branch}
-                        selection={quickScope}
-                        onSelectionChange={setQuickScope}
-                        listMaxHeightClassName="max-h-[min(38vh,14rem)] sm:max-h-80 lg:max-h-[min(52vh,26rem)] xl:max-h-[28rem]"
-                      />
-                      {analyzeType === 'quick' && quickScope.length === 0 && (
-                        <p className="text-xs text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 rounded-lg px-3 py-2 mt-2">
-                          Select at least one file or folder — quick analysis cannot run without a scope.
-                        </p>
-                      )}
+                  {/* Estimate info */}
+                  {(estimate || estimating) && (
+                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3 text-xs space-y-1.5">
+                      <p className="font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide text-[10px]">Estimate</p>
+                      {estimating ? (
+                        <p className="text-gray-400 dark:text-gray-500 italic">Calculating…</p>
+                      ) : estimate ? (
+                        <>
+                          <p className="text-gray-700 dark:text-gray-300">
+                            <span className="font-medium capitalize">{estimate.analysis_type}</span> analysis
+                            {estimate.file_count > 0 && (
+                              <span className="text-gray-400 dark:text-gray-500"> · {estimate.file_count} path{estimate.file_count !== 1 ? 's' : ''} selected</span>
+                            )}
+                          </p>
+                          <p className="text-gray-500 dark:text-gray-400">
+                            ~{estimate.estimated_credits} credit{estimate.estimated_credits !== 1 ? 's' : ''}
+                          </p>
+                        </>
+                      ) : null}
                     </div>
                   )}
                 </div>
@@ -1073,6 +1178,8 @@ export default function RepositoriesPage() {
                 onClick={() => {
                   setAnalyzeModal(null)
                   setQuickScope([])
+                  setSelectAll(true)
+                  setEstimate(null)
                 }}
                 className="w-full sm:flex-1 py-2.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-800"
               >
@@ -1081,7 +1188,7 @@ export default function RepositoriesPage() {
               <button
                 type="button"
                 onClick={submitAnalyze}
-                disabled={triggerMutation.isPending || (analyzeType === 'quick' && quickScope.length === 0)}
+                disabled={triggerMutation.isPending || (!selectAll && quickScope.length === 0)}
                 className="w-full sm:flex-1 py-2.5 text-sm bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-lg font-medium hover:bg-gray-700 dark:hover:bg-gray-300 disabled:opacity-50"
               >
                 {triggerMutation.isPending ? 'Starting...' : 'Start analysis'}
@@ -1269,7 +1376,7 @@ export default function RepositoriesPage() {
                   </div>
 
                   <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                    This context helps Lumis tailor its analysis. All fields are optional — you can update them later.
+                    This context helps Horion tailor its analysis. All fields are optional — you can update them later.
                   </p>
 
                   {/* Repo type */}

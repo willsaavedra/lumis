@@ -1,6 +1,33 @@
 version: "3.9"
 
 services:
+  # ── API Gateway (nginx + Let's Encrypt TLS) ───────────────────────────────
+  # Requires two env vars in .env.local (or exported):
+  #   DOMAIN        — public domain pointing to this host, e.g. api.horion.pro
+  #   CERTBOT_EMAIL — email for Let's Encrypt account / expiry notices
+  #
+  # First start: obtains a certificate via HTTP-01 challenge, then goes HTTPS.
+  # Subsequent starts: reuses existing cert; background loop renews at <30 days.
+  # For staging/testing: set CERTBOT_STAGING=true (avoids rate limits).
+  gateway:
+    build:
+      context: ./infra/nginx
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}
+      - CERTBOT_EMAIL=${CERTBOT_EMAIL}
+      - CERTBOT_STAGING=${CERTBOT_STAGING:-false}
+    volumes:
+      - letsencrypt:/etc/letsencrypt   # cert + account data (persisted)
+      - certbot_webroot:/var/www/certbot  # ACME challenge files
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
   web:
     build:
       context: ./apps/web
@@ -9,6 +36,8 @@ services:
     ports:
       - "3000:3000"
     environment:
+      # In dev: point to nginx gateway (https) or directly to api (http).
+      # Use https://localhost when working through the gateway.
       - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
       api:
@@ -86,6 +115,7 @@ services:
       - S3_ACCESS_KEY_ID=minioadmin
       - S3_SECRET_ACCESS_KEY=minioadmin
       - S3_BUCKET_NAME=lumis
+      - AGENT_BASE_URL=http://agent:8001
       - ENV=local
       - DEBUG=true
     env_file:
@@ -95,6 +125,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      agent:
+        condition: service_started
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -144,3 +176,5 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  letsencrypt:        # Let's Encrypt certs, account keys, renewal configs
+  certbot_webroot:    # ACME HTTP-01 challenge files (shared nginx ↔ certbot)

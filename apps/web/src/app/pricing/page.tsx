@@ -41,7 +41,7 @@ const plans = [
     credits: 'Custom credits',
     features: ['Custom limits', 'Dedicated support', 'SSO/SAML', 'Custom compliance rules', 'On-prem option'],
     cta: 'Contact sales',
-    href: 'mailto:sales@lumis.dev',
+    href: 'mailto:sales@horion.pro',
     highlight: false,
   },
 ]

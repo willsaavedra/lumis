@@ -132,12 +132,37 @@ def build_graph() -> StateGraph:
 analysis_graph = build_graph()
 
 
+async def _persist_analysis_failure(job_id: str, tenant_id: str, err: str) -> None:
+    """Mark job failed in DB and emit timeline/SSE event (agent runs decoupled from worker)."""
+    import uuid as uuid_mod
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from apps.api.core.database import AsyncSessionFactory
+    from apps.api.models.analysis import AnalysisJob
+    from apps.agent.nodes.base import publish_analysis_event
+
+    msg = (err or "Analysis failed.")[:2000]
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(select(AnalysisJob).where(AnalysisJob.id == uuid_mod.UUID(job_id)))
+        job = result.scalar_one_or_none()
+        if job:
+            job.status = "failed"
+            job.error_message = msg
+            job.completed_at = datetime.now(timezone.utc)
+        await session.commit()
+    await publish_analysis_event(job_id, tenant_id, "failed", 0, msg, event_type="step")
+
+
 async def run_analysis_graph(job_id: str) -> None:
     """
-    Entry point for running analysis. Called by the Celery worker.
+    Entry point for running analysis. Invoked by the agent HTTP server (or locally).
     Loads the job from DB, builds initial state, runs the graph.
     """
     log.info("analysis_graph_started", job_id=job_id)
+
+    failure_tenant_id: str | None = None
 
     try:
         from apps.api.core.database import AsyncSessionFactory
@@ -152,6 +177,8 @@ async def run_analysis_graph(job_id: str) -> None:
         if not job:
             log.error("analysis_job_not_found", job_id=job_id)
             return
+
+        failure_tenant_id = str(job.tenant_id)
 
         async with AsyncSessionFactory() as session:
             repo_result = await session.execute(select(Repository).where(Repository.id == job.repo_id))
@@ -210,6 +237,7 @@ async def run_analysis_graph(job_id: str) -> None:
                 "commit_sha": job.commit_sha,
                 "changed_files": job.changed_files.get("files", []) if job.changed_files else [],
                 "analysis_type": job.analysis_type,
+                "llm_provider": getattr(job, "llm_provider", "anthropic") or "anthropic",
                 "installation_id": installation_id,
                 "scm_type": scm_type,
                 "repo_context": repo_context,
@@ -240,4 +268,9 @@ async def run_analysis_graph(job_id: str) -> None:
     except Exception as e:
         import traceback
         log.error("analysis_graph_failed", job_id=job_id, error=str(e), traceback=traceback.format_exc())
+        if failure_tenant_id:
+            try:
+                await _persist_analysis_failure(job_id, failure_tenant_id, str(e))
+            except Exception as persist_exc:
+                log.warning("persist_analysis_failure_failed", job_id=job_id, error=str(persist_exc))
         raise

@@ -104,7 +104,7 @@ function InviteInner() {
           <p className="text-sm text-gray-600 dark:text-gray-400">Sign in with the invited email to accept.</p>
           <Link
             href="/login"
-            onClick={() => rawToken && sessionStorage.setItem('lumis_pending_invite', rawToken)}
+            onClick={() => rawToken && sessionStorage.setItem('hz-pending-invite', rawToken)}
             className="inline-block w-full py-2.5 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-lg font-medium text-center"
           >
             Sign in to accept

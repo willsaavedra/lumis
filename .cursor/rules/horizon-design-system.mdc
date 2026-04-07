@@ -1,0 +1,324 @@
+---
+description: Horion.pro design system — enforced for all frontend code in apps/web/
+globs: apps/web/**/*.{tsx,ts,css,js}
+alwaysApply: true
+---
+
+# Horion.pro Design System v1.0
+
+This rule applies to every file under `apps/web/`. All new components and edits **must** follow these specifications exactly. No deviations.
+
+---
+
+## Brand
+
+- Platform name: **Horion** / **horion.pro**
+- **Tagline / positioning:** **Reliability Engineering Platform** — use under the logo (nav, landing, auth), in `layout.tsx` metadata, and anywhere a one-line product descriptor is needed.
+- **Scope:** Horion is a reliability engineering product. Today, analyses focus on **observability** (metrics, logs, traces instrumentation); additional domains will follow. Do **not** use the deprecated tagline **"Observability Platform"** for the product as a whole.
+- Never write "Lumis" in UI copy, metadata, or localStorage keys.
+- localStorage / sessionStorage key prefix: `hz-` (e.g. `hz-theme`, `hz-token`, `hz-api-key`, `hz-pending-invite`)
+
+---
+
+## Font
+
+**JetBrains Mono** exclusively — for all text: headings, body, labels, buttons, inputs, nav, numbers, code.
+
+```tsx
+// Already imported in layout.tsx via next/font/google — no additional import needed.
+// Never use system fonts, Inter, or any other sans-serif.
+```
+
+---
+
+## Color — CSS Variables Only
+
+All colors come from `--hz-*` CSS variables defined in `globals.css`. **Never** use Tailwind color classes (`text-gray-*`, `bg-blue-*`, `border-red-*`, etc.) in components.
+
+Tailwind is for **layout and spacing only**: `flex`, `grid`, `gap`, `p`, `m`, `w`, `h`, `overflow`, `items-*`, `justify-*`, `rounded-*` (layout), `space-*`, `col-span-*`, `shrink-0`, etc.
+
+### Light mode tokens (`:root`)
+
+| Token | Value | Role |
+|-------|-------|------|
+| `--hz-bg` | `#ffffff` | Page background |
+| `--hz-bg2` | `#f8f8f6` | Sidebar, filter bars |
+| `--hz-bg3` | `#f0f0ec` | Hover, active nav, surface |
+| `--hz-bg4` | `#e8e8e2` | Avatars, deep surface |
+| `--hz-ink` | `#0a0a0a` | Primary text, logo |
+| `--hz-ink2` | `#3a3a3a` | Body text, secondary labels |
+| `--hz-muted` | `#888880` | Muted text, placeholders, nav inactive |
+| `--hz-rule` | `#e4e4de` | Dividers, borders |
+| `--hz-rule2` | `#d0d0c8` | Stronger borders, input borders |
+
+### Semantic tokens (both modes — analysis / reliability signals (findings, grades, status, etc.), never decorative)
+
+| Token | Light | Dark | Use |
+|-------|-------|------|-----|
+| `--hz-crit` | `#c0392b` | `#f87171` | Critical findings |
+| `--hz-crit-bg` | `#fef2f2` | `#2d1515` | Critical badge background |
+| `--hz-crit-bd` | `#fca5a5` | `#7f1d1d` | Critical badge border |
+| `--hz-warn` | `#b7791f` | `#fbbf24` | Warning findings |
+| `--hz-warn-bg` | `#fffbeb` | `#261d08` | Warning badge background |
+| `--hz-warn-bd` | `#fcd34d` | `#78350f` | Warning badge border |
+| `--hz-ok` | `#276749` | `#4ade80` | Completed, grade A |
+| `--hz-ok-bg` | `#ecfdf5` | `#0d2416` | OK badge background |
+| `--hz-ok-bd` | `#6ee7b7` | `#14532d` | OK badge border |
+| `--hz-info` | `#1a4480` | `#60a5fa` | Running, grade B |
+| `--hz-info-bg` | `#eff6ff` | `#0d1e3a` | Info badge background |
+
+### Usage in JSX
+
+```tsx
+// CORRECT — CSS vars via style prop
+<div style={{ background: 'var(--hz-bg2)', borderBottom: '1px solid var(--hz-rule)' }}>
+
+// CORRECT — Tailwind layout + CSS var inline style
+<div className="flex items-center gap-3 px-4" style={{ color: 'var(--hz-ink)' }}>
+
+// WRONG — Tailwind color classes
+<div className="bg-gray-100 text-gray-900 border-gray-200">  {/* ✗ never */}
+```
+
+---
+
+## Spacing
+
+`4 8 12 16 24 32 48 64px` — use Tailwind spacing utilities (`p-2`, `gap-4`, etc.) for these values.
+
+## Radius
+
+| Token | Value |
+|-------|-------|
+| `--hz-sm` | `4px` |
+| `--hz-md` | `8px` |
+| `--hz-lg` | `12px` |
+
+Use `border-radius: var(--hz-md)` in style props, or Tailwind `rounded-md` / `rounded-lg` for structural elements.
+
+## Borders & Shadows
+
+- Borders: always `1px solid var(--hz-rule)` or `var(--hz-rule2)` — never thicker for decoration.
+- Shadows: **none** — zero `box-shadow`. Use borders instead.
+
+---
+
+## Typography Scale
+
+All text is JetBrains Mono. Use the `.hz-*` global CSS classes or inline styles:
+
+| Scale | Size | Weight | Tracking | Class |
+|-------|------|--------|----------|-------|
+| hero | 40px | 700 | -0.03em | `.hz-hero` |
+| h1 | 28px | 700 | -0.025em | `.hz-h1` |
+| h2 | 20px | 500 | — | `.hz-h2` |
+| body | 14px | 400 | — | `.hz-body` (color: ink2, line-height 1.7) |
+| mono-sm | 12px | 400 | — | `.hz-sm` (color: muted) |
+| label | 10px | 400 | 0.16em | `.hz-label` (uppercase, muted) |
+| micro | 10px | 400 | — | `.hz-micro` |
+
+---
+
+## Coding Effects (mandatory)
+
+### 1. Cursor Blink — logo + loading states
+
+```tsx
+// Logo format — always this exact structure:
+<div style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '-0.04em', color: 'var(--hz-ink)' }}>
+  horion.pro<span className="hz-cursor" />
+</div>
+<p style={{ fontSize: '10px', color: 'var(--hz-muted)' }}>Reliability Engineering Platform</p>
+
+// CSS (in globals.css):
+// .hz-cursor { display:inline-block; width:8px; height:14px; background:var(--hz-ink);
+//   vertical-align:middle; animation:hz-blink 1.1s step-end infinite; }
+```
+
+### 2. Grid Background — hero, pricing, stat bars
+
+```tsx
+<div className="hz-grid-bg" style={{ /* other styles */ }}>
+// Dark mode handled automatically in globals.css
+```
+
+### 3. Scanline — terminal cards, code blocks only
+
+```tsx
+<div className="hz-scanline hz-term">
+  {/* content renders above ::after pseudo-element scanline */}
+</div>
+```
+
+### 4. Inline Code Token — file paths + function names in body text
+
+```tsx
+<span className="hz-tok">payment.go:203</span>
+```
+
+---
+
+## Component Specs
+
+### Button
+
+```tsx
+// Use global CSS classes:
+<button className="hz-btn hz-btn-primary">start free</button>
+<button className="hz-btn hz-btn-outline">see pricing</button>
+<button className="hz-btn hz-btn-ghost">log in</button>
+
+// Specs: padding 9px 18px / border-radius 8px / font-size 13px / letter-spacing -0.01em
+// Primary: bg var(--hz-ink) / color var(--hz-bg)
+// Outline: bg transparent / border var(--hz-ink) / color var(--hz-ink)
+// Ghost: bg transparent / border var(--hz-rule2) / color var(--hz-ink2)
+```
+
+### Badge (semantic only — no decorative colors)
+
+```tsx
+<div className="hz-badge hz-badge-crit"><span className="hz-dot" />3 critical</div>
+<div className="hz-badge hz-badge-warn"><span className="hz-dot" />11 warning</div>
+<div className="hz-badge hz-badge-ok"><span className="hz-dot" />completed</div>
+<div className="hz-badge hz-badge-info"><span className="hz-dot" />running</div>
+// Running dot pulses — animation built into hz-badge-info .hz-dot in globals.css
+```
+
+### Score Gauge
+
+```tsx
+<div className="hz-score">
+  <div className="hz-score-num" style={{ color: 'var(--hz-ok)' }}>77</div>
+  <div className="hz-score-grade hz-grade-b">B</div>
+  <div className="hz-score-lbl">Logs</div>
+  <div className="hz-score-bar">
+    <div className="hz-score-fill" style={{ width: '77%', background: 'var(--hz-info)' }} />
+  </div>
+</div>
+// Grade color: A→ok / B→info / C→warn / D→crit
+// Animate bar width from 0 to score% on mount: 0.6s cubic-bezier(0.4,0,0.2,1)
+```
+
+### Finding Card
+
+```tsx
+<div className="hz-fc">
+  <div className="hz-fc-bar hz-fc-bar-crit" />
+  <div>
+    <div className="hz-fc-title">Missing span on error path</div>
+    <div className="hz-fc-detail">handlePaymentError() returns without RecordError()</div>
+    <span className="hz-fc-loc">payment.go:203</span>
+  </div>
+</div>
+// Severity bar colors: hz-fc-bar-crit / hz-fc-bar-warn / hz-fc-bar-ok
+```
+
+### Terminal Card
+
+```tsx
+<div className="hz-term hz-scanline">
+  <div className="hz-term-bar">
+    <div className="hz-term-dot" /><div className="hz-term-dot" /><div className="hz-term-dot" />
+    <span className="hz-term-title">horion — analysis complete</span>
+  </div>
+  <div className="hz-term-body">
+    {/* color-coded body text with inline styles */}
+  </div>
+</div>
+```
+
+### Sidebar (dashboard shell)
+
+```tsx
+// Width: 240px (w-60)
+// Background: var(--hz-bg2) / border-right: 1px solid var(--hz-rule)
+// Nav items: 12px text / 14px icon / padding 7px 8px / border-radius 6px
+//   Active: bg var(--hz-bg3) / color var(--hz-ink) / font-weight 500
+//   Hover: bg var(--hz-bg3) / color var(--hz-ink2)
+```
+
+### Mini Stats Bar (4-column above tables)
+
+```tsx
+// Each cell: position:relative / 2px top accent border (color = grade or semantic)
+// + hz-grid-bg pattern overlay (absolute inset-0 opacity-50, pointer-events:none)
+// Stat number: 20px / 700 / letter-spacing -0.04em
+// Label: 9px / uppercase / var(--hz-muted) / tracking 0.12em
+```
+
+### Analyses Table
+
+```tsx
+// thead: bg var(--hz-bg2) / 10px uppercase labels / muted / border-bottom
+// Row: border-bottom 1px var(--hz-rule) / hover bg var(--hz-bg2) / cursor pointer
+// Row enter animation: opacity 0→1 + translateY 4px→0 / 0.3s ease / delay i*30ms
+```
+
+---
+
+## Dark / Light Mode
+
+```tsx
+// Toggle: add/remove class 'dark' on document.documentElement
+// Persist: localStorage.setItem('hz-theme', 'dark' | 'light')
+// Read: localStorage.getItem('hz-theme')
+// FOUC prevention: inline script in root layout.tsx already handles this
+
+// Smooth transition on all elements (already in globals.css):
+// *, *::before, *::after { transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease; }
+```
+
+---
+
+## File Structure
+
+```
+apps/web/src/
+├── app/
+│   ├── globals.css              ← ALL --hz-* tokens + effects + base classes
+│   ├── layout.tsx               ← JetBrains Mono + FOUC script (hz-theme key)
+│   └── (dashboard)/layout.tsx   ← Sidebar shell with horion.pro logo
+└── components/
+    ├── ThemeToggle.tsx           ← uses hz-theme key
+    └── ...                       ← all use --hz-* vars, no Tailwind colors
+```
+
+---
+
+## Quick Reference — What to Never Do
+
+```tsx
+// ✗ Tailwind color classes
+className="bg-gray-100 text-gray-900 border-blue-500"
+
+// ✗ Hard-coded color values
+style={{ color: '#374151', background: '#F9FAFB' }}
+
+// ✗ Box shadows
+style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}
+
+// ✗ Wrong brand name or deprecated tagline
+<span>Lumis</span>
+<span>Observability Platform</span>   {/* product tagline — use Reliability Engineering Platform */}
+localStorage.setItem('lumis_theme', ...)
+
+// ✗ Non-mono fonts
+className="font-sans"
+style={{ fontFamily: 'Inter, sans-serif' }}
+```
+
+```tsx
+// ✓ CSS variables for color
+style={{ color: 'var(--hz-ink)', background: 'var(--hz-bg2)' }}
+
+// ✓ Tailwind for layout
+className="flex items-center gap-3 px-4 py-2"
+
+// ✓ Borders instead of shadows
+style={{ border: '1px solid var(--hz-rule)' }}
+
+// ✓ Correct brand name + logo + tagline
+<span style={{ fontWeight:700, letterSpacing:'-0.04em' }}>horion.pro<span className="hz-cursor"/></span>
+<p style={{ fontSize:'10px', color:'var(--hz-muted)' }}>Reliability Engineering Platform</p>
+localStorage.setItem('hz-theme', ...)
+```

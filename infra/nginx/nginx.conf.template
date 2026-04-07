@@ -1,0 +1,109 @@
+# ── Horion API Gateway — Let's Encrypt TLS ──────────────────────────────────
+# Template processed by entrypoint.sh via envsubst.
+# Only ${DOMAIN} is substituted; nginx variables ($host, $remote_addr, etc.)
+# are left untouched because envsubst is called with the explicit var list.
+# ─────────────────────────────────────────────────────────────────────────────
+
+upstream api {
+    server api:8000;
+    keepalive 32;
+}
+
+# ── HTTP: ACME challenge passthrough + redirect everything else ───────────────
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    # Let's Encrypt HTTP-01 challenge — must NOT redirect
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ── HTTPS: API gateway ────────────────────────────────────────────────────────
+server {
+    listen 443 ssl;
+    server_name ${DOMAIN};
+
+    # Let's Encrypt certificates (managed by certbot in entrypoint.sh)
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_trusted_certificate /etc/letsencrypt/live/${DOMAIN}/chain.pem;
+
+    # Mozilla Intermediate TLS profile (2024)
+    ssl_protocols             TLSv1.2 TLSv1.3;
+    ssl_ciphers               ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache         shared:SSL:10m;
+    ssl_session_timeout       1d;
+    ssl_session_tickets       off;
+    ssl_buffer_size           4k;
+
+    # OCSP stapling
+    ssl_stapling        on;
+    ssl_stapling_verify on;
+    resolver            1.1.1.1 8.8.8.8 valid=300s;
+    resolver_timeout    5s;
+
+    # Security headers
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+    add_header X-Content-Type-Options    "nosniff"                                      always;
+    add_header X-Frame-Options           "DENY"                                         always;
+    add_header X-XSS-Protection          "1; mode=block"                                always;
+
+    # Gzip
+    gzip            on;
+    gzip_types      application/json text/plain text/html;
+    gzip_min_length 1024;
+    gzip_comp_level 4;
+
+    # Common proxy headers (inherited by all locations)
+    proxy_http_version  1.1;
+    proxy_set_header    Host              $host;
+    proxy_set_header    X-Real-IP         $remote_addr;
+    proxy_set_header    X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header    X-Forwarded-Proto $scheme;
+    proxy_set_header    Connection        "";
+
+    # ── SSE: analysis progress stream — no buffering ────────────────────────
+    location ~ ^/v1/analyses/[^/]+/events$ {
+        proxy_pass         http://api;
+        proxy_buffering    off;
+        proxy_cache        off;
+        proxy_read_timeout 3600s;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+        chunked_transfer_encoding on;
+        add_header         X-Accel-Buffering no always;
+    }
+
+    # ── Webhooks — moderate timeout (background processing) ─────────────────
+    location ~ ^/webhooks/ {
+        proxy_pass         http://api;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+
+    # ── Fix-PR generation — long timeout (LLM writes code, opens PR) ────────
+    location ~ ^/v1/analyses/[^/]+/fix-pr {
+        proxy_pass         http://api;
+        proxy_read_timeout 1800s;
+        proxy_send_timeout 120s;
+    }
+
+    # ── All other routes ─────────────────────────────────────────────────────
+    location / {
+        proxy_pass           http://api;
+        proxy_read_timeout   120s;
+        proxy_send_timeout   30s;
+        client_max_body_size 10m;
+    }
+}

@@ -7,7 +7,7 @@ import re
 import time
 import structlog
 
-from apps.agent.nodes.base import publish_progress, log_llm_call
+from apps.agent.nodes.base import publish_progress, publish_llm_call_started, log_llm_call
 from apps.agent.nodes.instrumentation_hints import (
     constraint_section,
     add_instrumentation_suggestion,
@@ -655,7 +655,7 @@ async def analyze_coverage_node(state: AgentState) -> dict:
         else:
             batches = [capped]
 
-        for batch in batches:
+        for batch_idx, batch in enumerate(batches):
             try:
                 llm_findings = await _llm_analyze_coverage(
                     batch,
@@ -665,9 +665,37 @@ async def analyze_coverage_node(state: AgentState) -> dict:
                     coverage_map=coverage_map,
                     file_obs_imports=file_obs_imports,
                 )
+                accepted = 0
+                rejected = 0
                 for f in llm_findings:
                     if f.get("confidence", "medium") != "low":
                         findings.append(f)
+                        accepted += 1
+                        log.debug(
+                            "finding_accepted",
+                            file=f.get("file_path"),
+                            pillar=f.get("pillar"),
+                            severity=f.get("severity"),
+                            confidence=f.get("confidence", "medium"),
+                            job_id=state.get("job_id"),
+                        )
+                    else:
+                        rejected += 1
+                        log.debug(
+                            "finding_rejected",
+                            file=f.get("file_path"),
+                            pillar=f.get("pillar"),
+                            reason="low_confidence",
+                            job_id=state.get("job_id"),
+                        )
+                log.info(
+                    "coverage_batch_result",
+                    batch_index=batch_idx,
+                    files_in_batch=len(batch),
+                    findings_accepted=accepted,
+                    findings_rejected=rejected,
+                    job_id=state.get("job_id"),
+                )
             except Exception as e:
                 log.warning("llm_coverage_analysis_failed", error=str(e), batch_size=len(batch))
 
@@ -697,11 +725,23 @@ async def _llm_analyze_coverage(
     use_primary_model=True  → settings.anthropic_model_primary (Sonnet)
     use_primary_model=False → settings.anthropic_model_triage  (Haiku)
     """
-    from anthropic import Anthropic
     from apps.agent.core.config import settings
+    from apps.agent.llm.chat_completion import chat_complete
 
-    client = Anthropic(api_key=settings.anthropic_api_key)
-    model = settings.anthropic_model_primary if use_primary_model else settings.anthropic_model_triage
+    provider = state.get("request", {}).get("llm_provider", "anthropic")
+    if provider == "cerebra_ai":
+        model = settings.cerebra_ai_model_primary if use_primary_model else settings.cerebra_ai_model_triage
+    else:
+        model = settings.anthropic_model_primary if use_primary_model else settings.anthropic_model_triage
+
+    log.info(
+        "coverage_batch_decision",
+        provider=provider,
+        model=model,
+        files_in_batch=len(files),
+        use_primary_model=use_primary_model,
+        job_id=state.get("job_id"),
+    )
 
     # Build file summaries
     detected_langs: set[str] = set()
@@ -890,18 +930,30 @@ CRITICAL for code_before / code_after:
 
 Return ONLY the JSON array — no markdown fences, no explanations."""
 
+    await publish_llm_call_started(
+        state,
+        "analyze_coverage",
+        model,
+        detail=f"Coverage batch ({len(files)} file(s)) — model {model}",
+    )
     t0 = time.monotonic()
-    message = client.messages.create(
+    resp = await chat_complete(
+        system=system_prompt,
+        user=user_content,
         model=model,
         max_tokens=2500,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_content}],
+        provider=provider,
+        base_url=settings.cerebra_ai_base_url,
+        api_key=settings.anthropic_api_key if provider == "anthropic" else settings.cerebra_ai_api_key,
+        temperature=settings.cerebra_ai_temperature if provider == "cerebra_ai" else 0.3,
+        top_p=settings.cerebra_ai_top_p if provider == "cerebra_ai" else 0.9,
+        timeout=settings.cerebra_ai_timeout if provider == "cerebra_ai" else 120,
     )
     latency_ms = (time.monotonic() - t0) * 1000
 
     findings: list[dict] = []
     try:
-        raw = message.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
@@ -910,12 +962,12 @@ Return ONLY the JSON array — no markdown fences, no explanations."""
     except Exception as e:
         log.warning("llm_response_parse_failed", error=str(e))
 
-    log_llm_call(
+    await log_llm_call(
         state=state,
         node="analyze_coverage",
         model=model,
-        input_tokens=message.usage.input_tokens,
-        output_tokens=message.usage.output_tokens,
+        input_tokens=resp.input_tokens,
+        output_tokens=resp.output_tokens,
         latency_ms=latency_ms,
         findings_count=len(findings),
         prompt_version=PROMPT_VERSION,

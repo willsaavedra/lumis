@@ -239,8 +239,20 @@ async def pre_triage_node(state: AgentState) -> dict:
     llm_succeeded = False
     if cfg["llm_classify"] and ambiguous and len(ambiguous) <= 40:
         try:
+            ambiguous_paths = {f["path"] for f in ambiguous}
             classified = await _llm_classify(classified, ambiguous, state)
             llm_succeeded = True
+            # Log aggregate outcome (not per-file to avoid noise on large repos)
+            after_map = {f["path"]: f["relevance_score"] for f in classified if f["path"] in ambiguous_paths}
+            promoted = sum(1 for score in after_map.values() if score >= 2)
+            demoted = sum(1 for score in after_map.values() if score == 0)
+            log.info(
+                "llm_classify_decision",
+                ambiguous_files=len(ambiguous),
+                promoted=promoted,
+                demoted=demoted,
+                job_id=state.get("job_id"),
+            )
         except Exception as e:
             log.warning("haiku_triage_failed_using_heuristics", error=str(e))
 
@@ -270,6 +282,25 @@ async def pre_triage_node(state: AgentState) -> dict:
     suppressed = _scan_lumis_ignore(classified)
     if suppressed:
         log.info("lumis_ignore_found", count=len(suppressed), job_id=state["job_id"])
+
+    # Log individual triage decisions only for small batches (avoids log flood on repo scans)
+    suppressed_paths = {s["file_path"] for s in suppressed}
+    if len(classified) <= 60:
+        for f in classified:
+            action = "included" if f["relevance_score"] >= min_score else "excluded"
+            reason: str | None = None
+            if f["path"] in suppressed_paths:
+                reason = "lumis_ignore"
+            elif action == "excluded":
+                reason = "score_threshold"
+            log.debug(
+                "file_triaged",
+                file=f["path"],
+                score=f["relevance_score"],
+                action=action,
+                **({"reason": reason} if reason else {}),
+                job_id=state.get("job_id"),
+            )
 
     log.info(
         "triage_complete",
@@ -308,20 +339,20 @@ async def _llm_classify(
     ambiguous: list[dict],
     state: AgentState,
 ) -> list[dict]:
-    """Use Haiku to classify ambiguous files."""
-    from anthropic import Anthropic
+    """Use triage model to classify ambiguous files."""
     from apps.agent.core.config import settings
+    from apps.agent.llm.chat_completion import chat_complete
 
-    client = Anthropic(api_key=settings.anthropic_api_key)
+    provider = state.get("request", {}).get("llm_provider", "anthropic")
+    if provider == "cerebra_ai":
+        model = settings.cerebra_ai_model_triage
+    else:
+        model = settings.anthropic_model_triage
+
     file_list = "\n".join(f"- {f['path']}" for f in ambiguous)
 
-    message = client.messages.create(
-        model=settings.anthropic_model_triage,
-        max_tokens=1024,
-        messages=[
-            {
-                "role": "user",
-                "content": f"""Classify each file by observability relevance (0=irrelevant, 1=low, 2=high).
+    system = "You classify source files by observability relevance. Return ONLY a valid JSON array. No markdown fences, no explanation. Start directly with [."
+    user_content = f"""Classify each file by observability relevance (0=irrelevant, 1=low, 2=high).
 High relevance: business logic, HTTP handlers, DB calls, queue consumers, error handling.
 Low relevance: utilities, helpers, configs.
 Irrelevant: tests, assets, generated code, docs.
@@ -329,14 +360,25 @@ Irrelevant: tests, assets, generated code, docs.
 Files:
 {file_list}
 
-Reply with ONLY a JSON array, no explanation: [{{"path": "...", "score": 0|1|2}}, ...]""",
-            },
-            {"role": "assistant", "content": "["},
-        ],
+Reply with ONLY a JSON array, no explanation: [{{"path": "...", "score": 0|1|2}}, ...]"""
+
+    resp = await chat_complete(
+        system=system,
+        user=user_content,
+        model=model,
+        max_tokens=1024,
+        provider=provider,
+        base_url=settings.cerebra_ai_base_url,
+        api_key=settings.anthropic_api_key if provider == "anthropic" else settings.cerebra_ai_api_key,
+        temperature=settings.cerebra_ai_temperature if provider == "cerebra_ai" else 0.3,
+        top_p=settings.cerebra_ai_top_p if provider == "cerebra_ai" else 0.9,
+        timeout=settings.cerebra_ai_timeout if provider == "cerebra_ai" else 120,
+        assistant_prefill="[" if provider == "anthropic" else None,
     )
 
-    raw = "[" + message.content[0].text
-    # Extract the first complete JSON array from the response
+    raw = resp.text.strip()
+    if not raw.startswith("["):
+        raw = "[" + raw
     match = re.search(r'\[.*?\]', raw, re.DOTALL)
     if not match:
         raise ValueError(f"No JSON array in response: {raw[:200]}")
@@ -347,4 +389,11 @@ Reply with ONLY a JSON array, no explanation: [{{"path": "...", "score": 0|1|2}}
         if f["path"] in score_map:
             f["relevance_score"] = score_map[f["path"]]
 
+    log.info(
+        "llm_classify_completed",
+        model=model,
+        provider=provider,
+        files_classified=len(score_map),
+        job_id=state.get("job_id"),
+    )
     return all_files

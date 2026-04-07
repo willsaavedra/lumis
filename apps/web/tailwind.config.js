@@ -1,4 +1,10 @@
 /** @type {import('tailwindcss').Config} */
+
+/**
+ * Horion.pro — Tailwind is used for LAYOUT and SPACING ONLY.
+ * All colors must come from CSS variables (--hz-*) defined in globals.css.
+ * Never use Tailwind color classes (text-gray-*, bg-blue-*, etc.) in components.
+ */
 const config = {
   darkMode: 'class',
   content: [
@@ -7,18 +13,7 @@ const config = {
     './src/app/**/*.{js,ts,jsx,tsx,mdx}',
   ],
   theme: {
-    extend: {
-      colors: {
-        brand: {
-          50: '#f0f4ff',
-          100: '#dce8ff',
-          500: '#4f6ef7',
-          600: '#3d55e0',
-          700: '#2d3fc7',
-          900: '#1a2480',
-        },
-      },
-    },
+    extend: {},
   },
   plugins: [],
 }

@@ -5,7 +5,7 @@ import asyncio
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Literal
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -92,21 +92,31 @@ def _parse_uuid_param(value: str, *, field: str) -> uuid.UUID:
 class TriggerAnalysisRequest(BaseModel):
     repo_id: str
     ref: str = "main"
-    analysis_type: str = "full"
+    analysis_type: str | None = Field(
+        default=None,
+        description=(
+            "If omitted the server derives the type: specific changed_files → quick; "
+            "no paths + context exists → full; no paths + no context → repository."
+        ),
+    )
+    llm_provider: Literal["anthropic", "cerebra_ai"] = "anthropic"
     changed_files: list[str] | None = Field(
         default=None,
         description="Paths relative to repo root (files or dirs). Required for quick; optional for full/repository.",
     )
 
-    @model_validator(mode="after")
-    def validate_quick_scope(self):
-        if self.analysis_type == "quick":
-            paths = [p.strip() for p in (self.changed_files or []) if p and str(p).strip()]
-            if not paths:
-                raise ValueError(
-                    "Quick analysis requires at least one file or directory path in changed_files.",
-                )
-        return self
+
+class EstimateRequest(BaseModel):
+    repo_id: str
+    paths: list[str] | None = Field(default=None, description="Selected file/folder paths. Null or empty means select-all.")
+    select_all: bool = False
+    ref: str = "main"
+
+
+class EstimateResponse(BaseModel):
+    file_count: int
+    estimated_credits: int
+    analysis_type: str
 
 
 class AnalysisResultPayload(BaseModel):
@@ -129,6 +139,7 @@ class AnalysisJobResponse(BaseModel):
     status: str
     trigger: str
     analysis_type: str
+    llm_provider: str = "anthropic"
     branch_ref: str | None = None
     pr_number: int | None
     commit_sha: str | None
@@ -152,6 +163,22 @@ _SORTABLE = frozenset(
 )
 
 
+@router.post("/estimate", response_model=EstimateResponse)
+async def estimate_analysis(body: EstimateRequest, current: CurrentUser) -> EstimateResponse:
+    """Return a lightweight credit/type estimate without starting an analysis."""
+    user, tenant_id, _ = current
+    from apps.api.services.analysis_service import estimate_analysis_cost
+    async with get_session_with_tenant(tenant_id) as session:
+        result = await estimate_analysis_cost(
+            session,
+            tenant_id,
+            body.repo_id,
+            paths=body.paths or [],
+            select_all=body.select_all,
+        )
+    return EstimateResponse(**result)
+
+
 @router.post("", response_model=AnalysisJobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def trigger_analysis(body: TriggerAnalysisRequest, current: CurrentUser) -> AnalysisJobResponse:
     user, tenant_id, _ = current
@@ -164,6 +191,7 @@ async def trigger_analysis(body: TriggerAnalysisRequest, current: CurrentUser) -
             body.ref,
             body.analysis_type,
             changed_files=body.changed_files,
+            llm_provider=body.llm_provider,
         )
         loaded = await session.execute(
             select(AnalysisJob)
@@ -378,9 +406,13 @@ async def create_fix_pr(job_id: str, current: CurrentUser) -> dict:
     return {"status": "enqueued", "job_id": job_id}
 
 
+def _timeline_key(tenant_id: str, job_id: str) -> str:
+    return f"t:{tenant_id}:analysis:{job_id}:timeline"
+
+
 @router.get("/{job_id}/stream")
 async def stream_analysis_progress(job_id: str, current: CurrentUser) -> StreamingResponse:
-    """SSE endpoint for live analysis progress."""
+    """SSE endpoint: Redis timeline replay (survives refresh) then live pub/sub."""
     user, tenant_id, _ = current
 
     try:
@@ -401,59 +433,84 @@ async def stream_analysis_progress(job_id: str, current: CurrentUser) -> Streami
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found.")
 
     ts = datetime.now(timezone.utc).isoformat()
+    tk = _timeline_key(tenant_id, job_id)
 
-    if job.status == "completed":
-
-        async def completed_once() -> AsyncGenerator[str, None]:
-            payload = json.dumps({
-                "stage": "done",
-                "progress_pct": 100,
-                "message": "Analysis complete.",
-                "timestamp": ts,
-            })
-            yield f"data: {payload}\n\n"
-
-        return StreamingResponse(completed_once(), media_type="text/event-stream")
-
-    if job.status == "failed":
-
-        async def failed_once() -> AsyncGenerator[str, None]:
-            payload = json.dumps({
-                "stage": "failed",
-                "progress_pct": 0,
-                "message": (job.error_message or "Analysis failed.")[:2000],
-                "timestamp": ts,
-            })
-            yield f"data: {payload}\n\n"
-
-        return StreamingResponse(failed_once(), media_type="text/event-stream")
-
-    async def event_generator() -> AsyncGenerator[str, None]:
+    async def replay_then_live(
+        *,
+        terminal_fallback: dict | None = None,
+    ) -> AsyncGenerator[str, None]:
         from apps.api.core.redis_client import get_redis
 
         redis = get_redis()
         channel = f"t:{tenant_id}:analysis:{job_id}:progress"
-        pubsub = redis.pubsub()
-        await pubsub.subscribe(channel)
         try:
-            while True:
-                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-                if message and message.get("data") is not None:
-                    raw = message["data"]
-                    data = raw.decode("utf-8") if isinstance(raw, bytes) else raw
-                    yield f"data: {data}\n\n"
-                    try:
-                        parsed = json.loads(data)
-                        if parsed.get("stage") in ("done", "failed"):
-                            break
-                    except Exception:
-                        pass
-                await asyncio.sleep(0.1)
-        finally:
-            await pubsub.unsubscribe(channel)
-            await pubsub.close()
+            history = await redis.lrange(tk, 0, -1)
+            terminal_seen = False
+            for raw in history:
+                yield f"data: {raw}\n\n"
+                try:
+                    ev = json.loads(raw)
+                    if ev.get("stage") in ("done", "failed"):
+                        terminal_seen = True
+                except Exception:
+                    pass
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+            if terminal_seen:
+                return
+
+            if terminal_fallback and not history:
+                yield f"data: {json.dumps(terminal_fallback)}\n\n"
+                return
+
+            pubsub = redis.pubsub()
+            await pubsub.subscribe(channel)
+            try:
+                while True:
+                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                    if message and message.get("data") is not None:
+                        raw = message["data"]
+                        data = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                        yield f"data: {data}\n\n"
+                        try:
+                            parsed = json.loads(data)
+                            if parsed.get("stage") in ("done", "failed"):
+                                break
+                        except Exception:
+                            pass
+                    await asyncio.sleep(0.1)
+            finally:
+                await pubsub.unsubscribe(channel)
+                await pubsub.close()
+        finally:
+            await redis.aclose()
+
+    if job.status == "completed":
+        fallback = {
+            "event_type": "step",
+            "stage": "done",
+            "progress_pct": 100,
+            "message": "Analysis complete.",
+            "timestamp": ts,
+        }
+        return StreamingResponse(
+            replay_then_live(terminal_fallback=fallback),
+            media_type="text/event-stream",
+        )
+
+    if job.status == "failed":
+        fallback = {
+            "event_type": "step",
+            "stage": "failed",
+            "progress_pct": 0,
+            "message": (job.error_message or "Analysis failed.")[:2000],
+            "timestamp": ts,
+        }
+        return StreamingResponse(
+            replay_then_live(terminal_fallback=fallback),
+            media_type="text/event-stream",
+        )
+
+    return StreamingResponse(replay_then_live(), media_type="text/event-stream")
 
 
 def _job_to_response(job: AnalysisJob) -> AnalysisJobResponse:
@@ -506,6 +563,7 @@ def _job_to_response(job: AnalysisJob) -> AnalysisJobResponse:
         status=job.status,
         trigger=job.trigger,
         analysis_type=job.analysis_type,
+        llm_provider=getattr(job, "llm_provider", None) or "anthropic",
         branch_ref=job.branch_ref,
         pr_number=job.pr_number,
         commit_sha=job.commit_sha,

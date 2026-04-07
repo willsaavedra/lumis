@@ -23,11 +23,11 @@ import { ThemeToggle } from '@/components/ThemeToggle'
 import { ToastContainer } from '@/components/Toast'
 
 const navigation: { name: string; href: string; icon: LucideIcon }[] = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'Analyses', href: '/analyses', icon: Zap },
+  { name: 'Dashboard',    href: '/dashboard',    icon: LayoutDashboard },
+  { name: 'Analyses',     href: '/analyses',     icon: Zap },
   { name: 'Repositories', href: '/repositories', icon: FolderGit2 },
-  { name: 'Billing', href: '/billing', icon: CreditCard },
-  { name: 'Settings', href: '/settings', icon: Settings },
+  { name: 'Billing',      href: '/billing',      icon: CreditCard },
+  { name: 'Settings',     href: '/settings',     icon: Settings },
 ]
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -48,7 +48,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [me?.membership_role, setMembershipRole])
 
-  // Wait for Zustand persist to hydrate from localStorage before checking auth
   useEffect(() => {
     setHydrated(true)
   }, [])
@@ -64,11 +63,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     router.push('/login')
   }
 
-  // Avoid flash of dashboard content before redirect
   if (!hydrated || !token) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-950">
-        <div className="w-5 h-5 border-2 border-gray-300 dark:border-gray-600 border-t-gray-900 dark:border-t-gray-100 rounded-full animate-spin" />
+      <div
+        className="flex h-screen items-center justify-center"
+        style={{ background: 'var(--hz-bg)' }}
+      >
+        <span
+          className="hz-cursor"
+          style={{ width: '10px', height: '18px', opacity: 0.4 }}
+        />
       </div>
     )
   }
@@ -77,15 +81,49 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const navItems = navigation.filter((item) => item.href !== '/billing' || showBilling)
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-950">
-      {/* Sidebar */}
-      <aside className="w-60 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col">
-        <div className="p-5 border-b border-gray-200 dark:border-gray-800">
-          <span className="text-xl font-bold text-gray-900 dark:text-gray-100">lumis</span>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">AI-powered Observability Platform</p>
+    <div
+      className="flex h-screen"
+      style={{ background: 'var(--hz-bg)' }}
+    >
+      {/* ── Sidebar ── */}
+      <aside
+        className="w-60 flex flex-col"
+        style={{
+          background: 'var(--hz-bg2)',
+          borderRight: '1px solid var(--hz-rule)',
+        }}
+      >
+        {/* Logo */}
+        <div
+          className="p-5"
+          style={{ borderBottom: '1px solid var(--hz-rule)' }}
+        >
+          <div
+            style={{
+              fontSize: '15px',
+              fontWeight: 700,
+              letterSpacing: '-0.04em',
+              color: 'var(--hz-ink)',
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            horion.pro<span className="hz-cursor" />
+          </div>
+          <p
+            style={{
+              fontSize: '10px',
+              color: 'var(--hz-muted)',
+              marginTop: '3px',
+              letterSpacing: '0.02em',
+            }}
+          >
+            Reliability Engineering Platform
+          </p>
         </div>
 
-        <nav className="flex-1 p-4 space-y-1">
+        {/* Nav */}
+        <nav className="flex-1 p-3 flex flex-col gap-0.5">
           {navItems.map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`)
             const Icon = item.icon
@@ -93,18 +131,32 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <Link
                 key={item.name}
                 href={item.href}
-                className={cn(
-                  'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-                  active
-                    ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100'
-                )}
+                className="flex items-center gap-2 px-2 py-1.5 rounded-md text-xs font-medium transition-none"
+                style={{
+                  background: active ? 'var(--hz-bg3)' : 'transparent',
+                  color: active ? 'var(--hz-ink)' : 'var(--hz-muted)',
+                  fontWeight: active ? 500 : 400,
+                }}
+                onMouseEnter={(e) => {
+                  if (!active) {
+                    e.currentTarget.style.background = 'var(--hz-bg3)'
+                    e.currentTarget.style.color = 'var(--hz-ink2)'
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!active) {
+                    e.currentTarget.style.background = 'transparent'
+                    e.currentTarget.style.color = 'var(--hz-muted)'
+                  }
+                }}
               >
                 <Icon
-                  className={cn(
-                    'h-5 w-5 shrink-0',
-                    active ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'
-                  )}
+                  className="shrink-0"
+                  style={{
+                    width: '14px',
+                    height: '14px',
+                    opacity: active ? 1 : 0.5,
+                  }}
                   strokeWidth={1.75}
                   aria-hidden
                 />
@@ -114,49 +166,92 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           })}
         </nav>
 
-        <div className="p-4 border-t border-gray-200 dark:border-gray-800 space-y-1">
-          <p className="px-3 pt-1 pb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+        {/* Footer */}
+        <div
+          className="p-3 flex flex-col gap-0.5"
+          style={{ borderTop: '1px solid var(--hz-rule)' }}
+        >
+          <p
+            className="px-2 pt-1 pb-2"
+            style={{
+              fontSize: '9px',
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.14em',
+              color: 'var(--hz-muted)',
+            }}
+          >
             Account
           </p>
           <TenantSwitcher />
           <Link
             href="/profile"
-            className={cn(
-              'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-              pathname === '/profile' || pathname.startsWith('/profile/')
-                ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100'
-            )}
+            className={cn('flex items-center gap-2 px-2 py-1.5 rounded-md text-xs font-medium')}
+            style={{
+              background:
+                pathname === '/profile' || pathname.startsWith('/profile/')
+                  ? 'var(--hz-bg3)'
+                  : 'transparent',
+              color:
+                pathname === '/profile' || pathname.startsWith('/profile/')
+                  ? 'var(--hz-ink)'
+                  : 'var(--hz-muted)',
+            }}
+            onMouseEnter={(e) => {
+              if (!(pathname === '/profile' || pathname.startsWith('/profile/'))) {
+                e.currentTarget.style.background = 'var(--hz-bg3)'
+                e.currentTarget.style.color = 'var(--hz-ink2)'
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!(pathname === '/profile' || pathname.startsWith('/profile/'))) {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.color = 'var(--hz-muted)'
+              }
+            }}
           >
             <UserCircle
-              className={cn(
-                'h-5 w-5 shrink-0',
-                pathname === '/profile' || pathname.startsWith('/profile/')
-                  ? 'text-gray-900 dark:text-gray-100'
-                  : 'text-gray-400 dark:text-gray-500'
-              )}
+              className="shrink-0"
+              style={{ width: '14px', height: '14px', opacity: 0.5 }}
               strokeWidth={1.75}
               aria-hidden
             />
             Profile
           </Link>
-          <div className="flex items-center justify-between px-3 py-2 rounded-lg">
-            <span className="text-sm text-gray-500 dark:text-gray-400">Theme</span>
+          <div className="flex items-center justify-between px-2 py-1.5 rounded-md">
+            <span style={{ fontSize: '12px', color: 'var(--hz-muted)' }}>Theme</span>
             <ThemeToggle />
           </div>
           <button
             type="button"
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            className="w-full flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-md"
+            style={{ color: 'var(--hz-muted)', background: 'transparent' }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = 'var(--hz-crit)'
+              e.currentTarget.style.background = 'var(--hz-bg3)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = 'var(--hz-muted)'
+              e.currentTarget.style.background = 'transparent'
+            }}
           >
-            <LogOut className="h-5 w-5 shrink-0 text-gray-400 dark:text-gray-500" strokeWidth={1.75} aria-hidden />
+            <LogOut
+              className="shrink-0"
+              style={{ width: '14px', height: '14px', opacity: 0.5 }}
+              strokeWidth={1.75}
+              aria-hidden
+            />
             Sign out
           </button>
         </div>
       </aside>
 
-      {/* Main content */}
-      <main className="flex-1 overflow-auto flex flex-col">
+      {/* ── Main content ── */}
+      <main
+        className="flex-1 overflow-auto flex flex-col"
+        style={{ background: 'var(--hz-bg)' }}
+      >
         <TenantProfileBanner />
         <div className="flex-1">{children}</div>
       </main>

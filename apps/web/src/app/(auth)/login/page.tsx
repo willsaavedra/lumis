@@ -23,9 +23,9 @@ export default function LoginPage() {
       const last = getLastTenantId()
       const data = await authApi.login(email, password, last)
       setAuth(data.access_token, data.tenant_id, data.user_id, data.membership_role)
-      const pending = typeof window !== 'undefined' ? sessionStorage.getItem('lumis_pending_invite') : null
+      const pending = typeof window !== 'undefined' ? sessionStorage.getItem('hz-pending-invite') : null
       if (pending) {
-        sessionStorage.removeItem('lumis_pending_invite')
+        sessionStorage.removeItem('hz-pending-invite')
         router.push(`/invite?token=${encodeURIComponent(pending)}`)
         return
       }
@@ -43,52 +43,80 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="bg-white dark:bg-gray-900 p-8 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+    <div
+      className="rounded-lg p-8 sm:p-10"
+      style={{
+        background: 'var(--hz-bg)',
+        border: '1px solid var(--hz-rule)',
+        borderRadius: 'var(--hz-lg)',
+      }}
+    >
       <div className="text-center mb-8">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Welcome back</h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">Sign in to Lumis</p>
+        <Link href="/" className="inline-block mb-6">
+          <div style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '-0.04em', color: 'var(--hz-ink)' }}>
+            horion.pro<span className="hz-cursor" />
+          </div>
+          <p className="hz-micro" style={{ color: 'var(--hz-muted)', marginTop: '4px' }}>
+            Reliability Engineering Platform
+          </p>
+        </Link>
+        <h1 className="hz-h2" style={{ margin: 0, color: 'var(--hz-ink)', fontSize: '22px', fontWeight: 600 }}>
+          Welcome back
+        </h1>
+        <p className="hz-body" style={{ marginTop: '8px', marginBottom: 0 }}>
+          Sign in to Horion
+        </p>
       </div>
 
       <GoogleAuthBlock actionLabel="Continue with Google" />
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
-          <div className="p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm border border-red-200 dark:border-red-800">
+          <div
+            className="rounded-md px-3 py-2.5 hz-sm"
+            style={{
+              background: 'var(--hz-crit-bg)',
+              border: '1px solid var(--hz-crit-bd)',
+              color: 'var(--hz-crit)',
+            }}
+          >
             {error}
           </div>
         )}
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
+          <label className="hz-label" style={{ display: 'block', marginBottom: '6px' }}>
+            Email
+          </label>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none"
+            className="hz-inp w-full px-3 py-2.5 text-sm"
+            autoComplete="email"
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Password</label>
+          <label className="hz-label" style={{ display: 'block', marginBottom: '6px' }}>
+            Password
+          </label>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none"
+            className="hz-inp w-full px-3 py-2.5 text-sm"
+            autoComplete="current-password"
           />
         </div>
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full py-2.5 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-lg font-medium hover:bg-gray-700 dark:hover:bg-gray-300 disabled:opacity-50 transition-colors"
-        >
-          {loading ? 'Signing in...' : 'Sign in'}
+        <button type="submit" disabled={loading} className="hz-btn hz-btn-primary w-full mt-2">
+          {loading ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
 
-      <p className="text-center text-sm text-gray-500 dark:text-gray-400 mt-6">
+      <p className="hz-body text-center mt-6" style={{ marginBottom: 0 }}>
         No account?{' '}
-        <Link href="/signup" className="text-gray-900 dark:text-gray-100 hover:underline font-medium">
+        <Link href="/signup" style={{ color: 'var(--hz-ink)', fontWeight: 500 }} className="hover:underline underline-offset-2">
           Sign up free
         </Link>
       </p>

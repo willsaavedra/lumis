@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { streamAnalysisProgress, type AnalysisProgressEvent } from '@/lib/api'
 
-const MAX_TIMELINE = 80
+const MAX_TIMELINE = 500
 
 /**
  * Subscribes to SSE progress for a running/pending analysis job.
