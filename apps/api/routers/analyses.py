@@ -128,6 +128,11 @@ class AnalysisResultPayload(BaseModel):
     score_traces: int | None = None
     findings: list[dict] = Field(default_factory=list)
     crossrun_summary: dict | None = None
+    # Execution telemetry
+    input_tokens: int = 0
+    output_tokens: int = 0
+    llm_calls: int = 0
+    cost_usd: float = 0.0
 
 
 class AnalysisJobResponse(BaseModel):
@@ -596,6 +601,10 @@ def _job_to_response(job: AnalysisJob) -> AnalysisJobResponse:
                 score_traces=r.score_traces,
                 findings=findings_list,
                 crossrun_summary=r.crossrun_summary if isinstance(getattr(r, "crossrun_summary", None), dict) else None,
+                input_tokens=getattr(r, "input_tokens_total", 0) or 0,
+                output_tokens=getattr(r, "output_tokens_total", 0) or 0,
+                llm_calls=getattr(r, "raw_llm_calls", 0) or 0,
+                cost_usd=float(getattr(r, "cost_usd", 0) or 0),
             )
     except Exception:
         pass
