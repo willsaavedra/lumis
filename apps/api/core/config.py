@@ -118,8 +118,8 @@ class Settings(BaseSettings):
         "repository": 15,
     }
 
-    api_base_url: str = "http://localhost:8000"
-    frontend_url: str = "http://localhost:3000"
+    api_base_url: str = "http://localhost:8000"  # env: API_BASE_URL — also used as OAuth redirect base
+    frontend_url: str = "http://localhost:3000"  # env: FRONTEND_URL — Google/Stripe redirect browser here
 
     # Celery worker → Lumis Agent HTTP (analysis graph runs in agent process)
     agent_base_url: str = "http://localhost:8001"

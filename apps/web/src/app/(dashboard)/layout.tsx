@@ -34,12 +34,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname()
   const router = useRouter()
   const { logout, token, membershipRole, setMembershipRole } = useAuthStore()
-  const [hydrated, setHydrated] = useState(false)
+  /** Wait for zustand persist — avoids redirect to /login before token is read from localStorage */
+  const [persistReady, setPersistReady] = useState(() =>
+    typeof window !== 'undefined' ? useAuthStore.persist.hasHydrated() : false,
+  )
 
   const { data: me } = useQuery({
     queryKey: ['auth-me'],
     queryFn: () => authApi.me(),
-    enabled: hydrated && !!token,
+    enabled: persistReady && !!token,
   })
 
   useEffect(() => {
@@ -49,21 +52,27 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, [me?.membership_role, setMembershipRole])
 
   useEffect(() => {
-    setHydrated(true)
+    if (useAuthStore.persist.hasHydrated()) {
+      setPersistReady(true)
+      return
+    }
+    const unsub = useAuthStore.persist.onFinishHydration(() => setPersistReady(true))
+    return unsub
   }, [])
 
   useEffect(() => {
-    if (hydrated && !token) {
+    if (!persistReady) return
+    if (!token) {
       router.replace('/login')
     }
-  }, [hydrated, token, router])
+  }, [persistReady, token, router])
 
   function handleLogout() {
     logout()
     router.push('/login')
   }
 
-  if (!hydrated || !token) {
+  if (!persistReady || !token) {
     return (
       <div
         className="flex h-screen items-center justify-center"
