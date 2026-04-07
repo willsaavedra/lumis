@@ -128,8 +128,9 @@ async def post_report_node(state: AgentState) -> dict:
     score_global = scores.get("global_score")
 
     # Publish execution_summary SSE event before done
+    # stage must NOT be "done"/"failed" — those are terminal signals that close the SSE stream
     await publish_analysis_event(
-        job_id, tenant_id, "done", 100,
+        job_id, tenant_id, "summary", 99,
         "Execution summary ready",
         event_type="execution_summary",
         extra=exec_summary,
