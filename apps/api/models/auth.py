@@ -27,6 +27,7 @@ class Tenant(Base):
     credits_monthly_limit: Mapped[int] = mapped_column(nullable=False, default=50)
     credits_used_this_period: Mapped[int] = mapped_column(nullable=False, default=0)
     extra_balance_usd: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    real_cost_used_this_period: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False, server_default="0", default=0)
     onboarding_step: Mapped[int] = mapped_column(nullable=False, default=0)
     needs_profile_completion: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 

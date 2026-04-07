@@ -11,6 +11,11 @@ class AnalysisType(str, Enum):
     FULL = "full"
     REPOSITORY = "repository"
 
+class ScopeType(str, Enum):
+    FULL_REPO = "full_repo"
+    SELECTION = "selection"
+    CONTEXT = "context"
+
 
 class Severity(str, Enum):
     CRITICAL = "critical"
@@ -104,11 +109,23 @@ class EfficiencyScores:
 
 
 @dataclass
+class NodeTokens:
+    node: str = ""
+    input: int = 0
+    output: int = 0
+    cached: int = 0
+    cost_usd: float = 0.0
+    cumulative_usd: float = 0.0
+
+
+@dataclass
 class TokenUsage:
     input_tokens: int = 0
     output_tokens: int = 0
+    cached_tokens: int = 0
     llm_calls: int = 0
     cost_usd: float = 0.0
+    by_node: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -125,6 +142,19 @@ class AnalysisRequest:
     analysis_type: str
     installation_id: str | None
     scm_type: str
+
+
+@dataclass
+class StageDetail:
+    node: str = ""
+    started_at: str = ""
+    completed_at: str = ""
+    duration_ms: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    cost_usd: float = 0.0
+    findings_generated: int = 0
 
 
 class AgentState(TypedDict):
@@ -144,8 +174,8 @@ class AgentState(TypedDict):
     error: str | None
     stage: str
     progress_pct: int
-    repo_context: dict | None  # repo_type, language, observability_backend, context_summary
-    suppressed: list[dict]     # lumis-ignore entries: [{"file_path": str, "line": int}]
-    previous_job_id: str | None  # last completed job for same repo (set by diff_crossrun)
-    crossrun_summary: dict | None  # new/persisting/resolved counts, resolved list (set by diff_crossrun)
-    rag_context: str | None      # RAG context block injected into analyze_coverage system prompt
+    repo_context: dict | None
+    suppressed: list[dict]
+    previous_job_id: str | None
+    crossrun_summary: dict | None
+    rag_context: str | None

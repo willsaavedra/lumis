@@ -203,6 +203,36 @@ class StripeService:
             timestamp=int(timestamp.timestamp()) if hasattr(timestamp, "timestamp") else int(time.time()),
         )
 
+    async def report_cost_usage(
+        self,
+        tenant_id: str,
+        customer_id: str,
+        cost_usd_cents: int,
+        job_id: str,
+    ) -> None:
+        """Report overage cost in cents to Stripe Meters (token-based billing)."""
+        if not settings.stripe_meter_id:
+            return
+        if cost_usd_cents <= 0:
+            return
+
+        import time
+        log.info(
+            "stripe_cost_usage_report",
+            tenant_id=tenant_id,
+            cost_usd_cents=cost_usd_cents,
+            job_id=job_id,
+        )
+        stripe.billing.MeterEvent.create(
+            event_name="analysis_cost_consumed",
+            payload={
+                "value": str(cost_usd_cents),
+                "stripe_customer_id": customer_id,
+            },
+            identifier=str(job_id),
+            timestamp=int(time.time()),
+        )
+
     async def cancel_subscription(self, tenant_id: str, subscription_id: str) -> None:
         """Cancel subscription at period end."""
         stripe.Subscription.modify(

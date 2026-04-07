@@ -715,7 +715,7 @@ async def analyze_coverage_node(state: AgentState) -> dict:
                     status="active" if batch_idx < len(batches) - 1 else "done",
                     files=batch_paths,
                 )
-                await publish_cost_update(state)
+                await publish_cost_update(state, node="analyze_coverage")
 
                 log.info(
                     "coverage_batch_result",
@@ -1006,6 +1006,7 @@ Return ONLY the JSON array — no markdown fences, no explanations."""
         latency_ms=latency_ms,
         findings_count=len(findings),
         prompt_version=PROMPT_VERSION,
+        cached_tokens=getattr(resp, "cached_tokens", 0),
     )
 
     return findings

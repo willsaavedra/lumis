@@ -31,6 +31,11 @@ class UsageResponse(BaseModel):
     stripe_status: str | None
     extra_balance_usd: float
     overage_rate_per_credit: float
+    # Token-based billing fields
+    used_real_cost_usd: float = 0.0
+    included_budget_usd: float | None = None
+    remaining_budget_usd: float | None = None
+    budget_usage_pct: float = 0.0
 
 
 class CheckoutRequest(BaseModel):
@@ -71,6 +76,12 @@ async def get_usage(current: TenantAdmin) -> UsageResponse:
     estimated_overage_cost = round(overage * rate, 2)
     extra_bal = float(tenant.extra_balance_usd or 0)
 
+    from apps.api.billing.billing_gate import PLAN_INCLUDED_REAL_COST
+    real_cost_used = float(getattr(tenant, "real_cost_used_this_period", 0) or 0)
+    included_budget = PLAN_INCLUDED_REAL_COST.get(tenant.plan)
+    remaining_budget = max(0, float(included_budget or 0) - real_cost_used) if included_budget is not None else None
+    budget_pct = round(real_cost_used / float(included_budget) * 100, 1) if included_budget and included_budget > 0 else 0.0
+
     return UsageResponse(
         plan=tenant.plan,
         credits_included=included,
@@ -82,6 +93,10 @@ async def get_usage(current: TenantAdmin) -> UsageResponse:
         stripe_status=tenant.stripe_subscription_status,
         extra_balance_usd=extra_bal,
         overage_rate_per_credit=rate,
+        used_real_cost_usd=round(real_cost_used, 6),
+        included_budget_usd=float(included_budget) if included_budget is not None else None,
+        remaining_budget_usd=remaining_budget,
+        budget_usage_pct=budget_pct,
     )
 
 

@@ -99,6 +99,8 @@ class TriggerAnalysisRequest(BaseModel):
             "no paths + context exists → full; no paths + no context → repository."
         ),
     )
+    scope_type: Literal["full_repo", "selection"] | None = None
+    selected_paths: list[str] = Field(default_factory=list)
     llm_provider: Literal["anthropic", "cerebra_ai"] = "cerebra_ai"
     changed_files: list[str] | None = Field(
         default=None,
@@ -108,7 +110,10 @@ class TriggerAnalysisRequest(BaseModel):
 
 class EstimateRequest(BaseModel):
     repo_id: str
-    paths: list[str] | None = Field(default=None, description="Selected file/folder paths. Null or empty means select-all.")
+    scope_type: Literal["full_repo", "selection"] = "full_repo"
+    selected_paths: list[str] = Field(default_factory=list)
+    llm_provider: Literal["anthropic", "cerebra_ai"] = "cerebra_ai"
+    paths: list[str] | None = Field(default=None, description="Legacy: selected file/folder paths.")
     select_all: bool = False
     ref: str = "main"
 
@@ -117,6 +122,14 @@ class EstimateResponse(BaseModel):
     file_count: int
     estimated_credits: int
     analysis_type: str
+    # Token-based billing fields
+    low_usd: float | None = None
+    mid_usd: float | None = None
+    high_usd: float | None = None
+    real_cost_mid_usd: float | None = None
+    breakdown: dict | None = None
+    budget_remaining_usd: float | None = None
+    llm_provider: str | None = None
 
 
 class AnalysisResultPayload(BaseModel):
@@ -133,6 +146,7 @@ class AnalysisResultPayload(BaseModel):
     output_tokens: int = 0
     llm_calls: int = 0
     cost_usd: float = 0.0
+    cost_breakdown: dict | None = None
 
 
 class AnalysisJobResponse(BaseModel):
@@ -144,12 +158,22 @@ class AnalysisJobResponse(BaseModel):
     status: str
     trigger: str
     analysis_type: str
+    scope_type: str | None = None
     llm_provider: str = "anthropic"
     branch_ref: str | None = None
     pr_number: int | None
     commit_sha: str | None
     credits_consumed: int | None
     score_global: int | None
+    # Token-based billing
+    total_cost_usd: float | None = None
+    llm_cost_usd: float | None = None
+    infra_cost_usd: float | None = None
+    margin_applied: float | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    input_tokens_cached: int | None = None
+    selected_paths: list[str] | None = None
     created_at: str
     started_at: str | None = None
     completed_at: str | None
@@ -172,7 +196,7 @@ _SORTABLE = frozenset(
 
 @router.post("/estimate", response_model=EstimateResponse)
 async def estimate_analysis(body: EstimateRequest, current: CurrentUser) -> EstimateResponse:
-    """Return a lightweight credit/type estimate without starting an analysis."""
+    """Return a lightweight cost estimate without starting an analysis."""
     user, tenant_id, _ = current
     from apps.api.services.analysis_service import estimate_analysis_cost
     async with get_session_with_tenant(tenant_id) as session:
@@ -180,8 +204,10 @@ async def estimate_analysis(body: EstimateRequest, current: CurrentUser) -> Esti
             session,
             tenant_id,
             body.repo_id,
-            paths=body.paths or [],
+            paths=body.paths or body.selected_paths or [],
             select_all=body.select_all,
+            scope_type=body.scope_type,
+            llm_provider=body.llm_provider,
         )
     return EstimateResponse(**result)
 
@@ -199,6 +225,8 @@ async def trigger_analysis(body: TriggerAnalysisRequest, current: CurrentUser) -
             body.analysis_type,
             changed_files=body.changed_files,
             llm_provider=body.llm_provider,
+            scope_type=body.scope_type,
+            selected_paths=body.selected_paths,
         )
         loaded = await session.execute(
             select(AnalysisJob)
@@ -257,6 +285,49 @@ async def cancel_analysis(job_id: str, current: CurrentUser) -> dict:
 
     log.info("analysis_cancelled", job_id=job_id, user=str(user.id))
     return {"status": "cancelled", "job_id": job_id}
+
+
+@router.get("/{job_id}/cost-events")
+async def get_cost_events(
+    job_id: str,
+    current: CurrentUser,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> dict:
+    """Return paginated cost_events for a job (token-based billing detail)."""
+    from apps.api.models.analysis import CostEvent
+    user, tenant_id, _ = current
+    job_uuid = uuid.UUID(job_id)
+
+    async with get_session_with_tenant(tenant_id) as session:
+        result = await session.execute(
+            select(CostEvent)
+            .where(CostEvent.job_id == job_uuid, CostEvent.tenant_id == uuid.UUID(tenant_id))
+            .order_by(CostEvent.created_at)
+            .limit(limit)
+            .offset(offset)
+        )
+        events = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(e.id),
+                "event_type": e.event_type,
+                "stage": e.stage,
+                "input_tokens": e.input_tokens,
+                "output_tokens": e.output_tokens,
+                "cached_tokens": e.cached_tokens,
+                "llm_provider": e.llm_provider,
+                "cost_usd": float(e.cost_usd or 0),
+                "cumulative_cost": float(e.cumulative_cost or 0),
+                "metadata": e.metadata_json,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in events
+        ],
+        "total": len(events),
+    }
 
 
 def _apply_analysis_list_filters(
@@ -605,6 +676,7 @@ def _job_to_response(job: AnalysisJob) -> AnalysisJobResponse:
                 output_tokens=getattr(r, "output_tokens_total", 0) or 0,
                 llm_calls=getattr(r, "raw_llm_calls", 0) or 0,
                 cost_usd=float(getattr(r, "cost_usd", 0) or 0),
+                cost_breakdown=getattr(r, "cost_breakdown", None),
             )
     except Exception:
         pass
@@ -630,6 +702,16 @@ def _job_to_response(job: AnalysisJob) -> AnalysisJobResponse:
         if files and isinstance(files, list) and len(files) > 0:
             scope_paths = files
 
+    total_cost = float(getattr(job, "total_cost_usd", 0) or 0)
+    llm_cost = float(getattr(job, "llm_cost_usd", 0) or 0)
+    infra_cost = float(getattr(job, "infra_cost_usd", 0) or 0)
+    margin = float(getattr(job, "margin_applied", 0) or 0)
+    inp_tokens = int(getattr(job, "input_tokens", 0) or 0)
+    out_tokens = int(getattr(job, "output_tokens", 0) or 0)
+    cached = int(getattr(job, "input_tokens_cached", 0) or 0)
+    sel_paths = getattr(job, "selected_paths", None) or []
+    scope_t = getattr(job, "scope_type", None)
+
     return AnalysisJobResponse(
         id=str(job.id),
         repo_id=str(job.repo_id),
@@ -639,12 +721,21 @@ def _job_to_response(job: AnalysisJob) -> AnalysisJobResponse:
         status=job.status,
         trigger=job.trigger,
         analysis_type=job.analysis_type,
+        scope_type=scope_t,
         llm_provider=getattr(job, "llm_provider", None) or "anthropic",
         branch_ref=job.branch_ref,
         pr_number=job.pr_number,
         commit_sha=job.commit_sha,
         credits_consumed=job.credits_consumed,
         score_global=score,
+        total_cost_usd=total_cost if total_cost > 0 else None,
+        llm_cost_usd=llm_cost if llm_cost > 0 else None,
+        infra_cost_usd=infra_cost if infra_cost > 0 else None,
+        margin_applied=margin if margin > 0 else None,
+        input_tokens=inp_tokens if inp_tokens > 0 else None,
+        output_tokens=out_tokens if out_tokens > 0 else None,
+        input_tokens_cached=cached if cached > 0 else None,
+        selected_paths=sel_paths if sel_paths else None,
         created_at=job.created_at.isoformat(),
         started_at=job.started_at.isoformat() if job.started_at else None,
         completed_at=job.completed_at.isoformat() if job.completed_at else None,

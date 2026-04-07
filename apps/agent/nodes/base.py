@@ -178,21 +178,20 @@ async def publish_file_status(
     )
 
 
-async def publish_cost_update(state: AgentState) -> None:
-    """Emit current cost breakdown from token_usage."""
+async def publish_cost_update(state: AgentState, *, node: str = "") -> None:
+    """Emit current cost breakdown from token_usage with per-node detail."""
     usage = state.get("token_usage") or {}
     total = usage.get("cost_usd", 0.0)
+    by_node = usage.get("by_node", {})
+    provider = state.get("request", {}).get("llm_provider", "anthropic")
+    cached_total = usage.get("cached_tokens", 0)
+    input_total = usage.get("input_tokens", 0)
 
-    haiku_cost = 0.0
-    sonnet_cost = 0.0
-    for _call in (state.get("_llm_cost_log") or []):
-        if "haiku" in (_call.get("model") or "").lower():
-            haiku_cost += _call.get("cost", 0.0)
-        else:
-            sonnet_cost += _call.get("cost", 0.0)
+    from apps.api.billing.billing_gate import compute_llm_cost
+    no_cache_cost = compute_llm_cost(input_total, 0, usage.get("output_tokens", 0), provider)
+    cache_savings = max(0, no_cache_cost - total)
 
-    if haiku_cost == 0 and sonnet_cost == 0:
-        sonnet_cost = total
+    files_analyzed = len([f for f in (state.get("changed_files") or []) if isinstance(f, dict) and f.get("relevance_score", 0) >= 1])
 
     await publish_analysis_event(
         str(state["job_id"]),
@@ -202,10 +201,23 @@ async def publish_cost_update(state: AgentState) -> None:
         f"Cost: ${total:.3f}",
         event_type="cost_update",
         extra={
-            "haiku_usd": round(haiku_cost, 4),
-            "sonnet_usd": round(sonnet_cost, 4),
-            "embeddings_usd": 0.0,
             "total_usd": round(total, 4),
+            "cumulative_cost_usd": round(total, 4),
+            "cumulative_cost_display": f"${total:.3f}",
+            "llm_provider": provider,
+            "node_tokens": by_node.get(node, {}) if node else {},
+            "node_cost_usd": round(by_node.get(node, {}).get("cost_usd", 0), 4) if node else 0,
+            "prompt_cache_savings_usd": round(cache_savings, 4),
+            "files_analyzed_so_far": files_analyzed,
+            "tokens_input": input_total,
+            "tokens_output": usage.get("output_tokens", 0),
+            "tokens_cached": cached_total,
+            "cache_hit_rate": round(cached_total / max(1, input_total), 3),
+            "by_node": {k: {"input": v.get("input", 0), "output": v.get("output", 0), "cached": v.get("cached", 0), "cost_usd": round(v.get("cost_usd", 0), 4)} for k, v in by_node.items()},
+            # Legacy compat
+            "haiku_usd": 0.0,
+            "sonnet_usd": round(total, 4),
+            "embeddings_usd": 0.0,
             "credits_consumed": max(1, int(total / 0.05)) if total > 0 else 0,
         },
     )
@@ -267,24 +279,35 @@ async def log_llm_call(
     findings_count: int,
     prompt_version: str,
     cache_hit: bool = False,
+    cached_tokens: int = 0,
 ) -> None:
     """
-    Log each LLM call with full metadata; update token_usage; emit timeline + structured log.
+    Log each LLM call with full metadata; update token_usage with per-node breakdown;
+    emit timeline + structured log; insert cost_events row.
     """
     try:
+        from apps.api.billing.billing_gate import compute_llm_cost
+
         provider = state.get("request", {}).get("llm_provider", "anthropic")
-        if provider == "cerebra_ai":
-            cost = 0.0
-        elif "haiku" in model.lower():
-            cost = (input_tokens * 0.8 + output_tokens * 4.0) / 1_000_000
-        else:
-            cost = (input_tokens * 3.0 + output_tokens * 15.0) / 1_000_000
+        cost = compute_llm_cost(input_tokens, cached_tokens, output_tokens, provider)
 
         usage = state.get("token_usage") or {}
         usage["input_tokens"] = usage.get("input_tokens", 0) + input_tokens
         usage["output_tokens"] = usage.get("output_tokens", 0) + output_tokens
+        usage["cached_tokens"] = usage.get("cached_tokens", 0) + cached_tokens
         usage["llm_calls"] = usage.get("llm_calls", 0) + 1
         usage["cost_usd"] = round(usage.get("cost_usd", 0.0) + cost, 6)
+
+        by_node = usage.get("by_node", {})
+        existing = by_node.get(node, {"input": 0, "output": 0, "cached": 0, "cost_usd": 0.0, "cumulative_usd": 0.0})
+        existing["input"] = existing.get("input", 0) + input_tokens
+        existing["output"] = existing.get("output", 0) + output_tokens
+        existing["cached"] = existing.get("cached", 0) + cached_tokens
+        existing["cost_usd"] = round(existing.get("cost_usd", 0.0) + cost, 6)
+        existing["cumulative_usd"] = usage["cost_usd"]
+        by_node[node] = existing
+        usage["by_node"] = by_node
+
         state["token_usage"] = usage  # type: ignore[index]
 
         summary = (
@@ -304,12 +327,39 @@ async def log_llm_call(
                 "model": model,
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
+                "cached_tokens": cached_tokens,
                 "latency_ms": round(latency_ms, 2),
                 "findings_count": findings_count,
                 "prompt_version": prompt_version,
                 "llm_streaming": False,
+                "node_cost_usd": round(cost, 6),
+                "cumulative_cost_usd": usage["cost_usd"],
             },
         )
+
+        # Insert cost_events row for this node
+        try:
+            from apps.api.core.database import AsyncSessionFactory
+            from apps.api.models.analysis import CostEvent
+            import uuid as uuid_mod
+            from decimal import Decimal
+
+            async with AsyncSessionFactory() as session:
+                session.add(CostEvent(
+                    job_id=uuid_mod.UUID(str(state["job_id"])),
+                    tenant_id=uuid_mod.UUID(str(state["tenant_id"])),
+                    event_type="node_completed",
+                    stage=node,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cached_tokens=cached_tokens,
+                    llm_provider=provider,
+                    cost_usd=Decimal(str(round(cost, 6))),
+                    cumulative_cost=Decimal(str(usage["cost_usd"])),
+                ))
+                await session.commit()
+        except Exception as ce_exc:
+            log.warning("cost_event_insert_failed", error=str(ce_exc))
 
         log.info(
             "llm_call",
@@ -318,11 +368,13 @@ async def log_llm_call(
             model=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cached_tokens=cached_tokens,
             latency_ms=round(latency_ms),
             cost_usd=round(cost, 6),
+            cumulative_cost_usd=usage["cost_usd"],
             findings_count=findings_count,
             prompt_version=prompt_version,
-            cache_hit=cache_hit,
+            cache_hit=cache_hit or cached_tokens > 0,
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
     except Exception as exc:

@@ -1,10 +1,11 @@
-"""Analysis job, result, and finding models."""
+"""Analysis job, result, finding, and cost event models."""
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
 from decimal import Decimal
 
+import sqlalchemy as sa
 from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -39,10 +40,21 @@ class AnalysisJob(Base):
         Enum("quick", "full", "repository", "context", name="analysis_type_enum"),
         nullable=False, default="full",
     )
+    scope_type: Mapped[str] = mapped_column(Text, nullable=False, server_default="full_repo")
     llm_provider: Mapped[str] = mapped_column(Text, nullable=False, default="anthropic")
     credits_reserved: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     billing_reservation: Mapped[dict | None] = mapped_column(JSONB)
     credits_consumed: Mapped[int | None] = mapped_column(Integer)
+    # Token-based billing columns
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
+    input_tokens_cached: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
+    llm_cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False, server_default="0", default=0)
+    infra_cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False, server_default="0", default=0)
+    total_cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False, server_default="0", default=0)
+    margin_applied: Mapped[Decimal] = mapped_column(Numeric(4, 2), nullable=False, server_default="3.0", default=Decimal("3.0"))
+    estimated_cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False, server_default="0", default=0)
+    selected_paths: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="[]")
     error_message: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -80,6 +92,7 @@ class AnalysisResult(Base):
     input_tokens_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     output_tokens_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False, default=0)
+    cost_breakdown: Mapped[dict | None] = mapped_column(JSONB, server_default=sa.text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     job: Mapped[AnalysisJob] = relationship(
@@ -149,3 +162,22 @@ class FindingFeedback(Base):
     feedback_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     finding: Mapped[Finding] = relationship(back_populates="feedback")
+
+
+class CostEvent(Base):
+    """Per-node and final cost events for token-based billing."""
+    __tablename__ = "cost_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("analysis_jobs.id", ondelete="CASCADE"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"))
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    stage: Mapped[str | None] = mapped_column(Text)
+    input_tokens: Mapped[int] = mapped_column(Integer, server_default="0")
+    output_tokens: Mapped[int] = mapped_column(Integer, server_default="0")
+    cached_tokens: Mapped[int] = mapped_column(Integer, server_default="0")
+    llm_provider: Mapped[str | None] = mapped_column(Text)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 6), server_default="0")
+    cumulative_cost: Mapped[Decimal] = mapped_column(Numeric(10, 6), server_default="0")
+    metadata_json: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

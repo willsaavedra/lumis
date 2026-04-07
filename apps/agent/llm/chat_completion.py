@@ -13,6 +13,7 @@ class LLMResponse:
     text: str
     input_tokens: int
     output_tokens: int
+    cached_tokens: int = 0
 
 
 async def chat_complete(
@@ -32,7 +33,7 @@ async def chat_complete(
     """
     Single async entry-point for all LLM chat calls.
 
-    provider="anthropic"  → Anthropic SDK (messages API)
+    provider="anthropic"  → Anthropic SDK (messages API) with prompt caching
     provider="cerebra_ai" → OpenAI-compatible POST /v1/chat/completions via httpx
     """
     if provider == "anthropic":
@@ -76,10 +77,21 @@ async def _call_anthropic(
     if assistant_prefill:
         messages.append({"role": "assistant", "content": assistant_prefill})
 
+    # Enable prompt caching on the system prompt: mark the last block with
+    # cache_control so the Anthropic API can reuse it across calls for the
+    # same tenant.  The system param is passed as a content-block list.
+    system_blocks = [
+        {
+            "type": "text",
+            "text": system,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
     message = await client.messages.create(
         model=model,
         max_tokens=max_tokens,
-        system=system,
+        system=system_blocks,
         messages=messages,
     )
 
@@ -87,10 +99,13 @@ async def _call_anthropic(
     if assistant_prefill:
         text = assistant_prefill + text
 
+    cached_tokens = getattr(message.usage, "cache_read_input_tokens", 0) or 0
+
     return LLMResponse(
         text=text,
         input_tokens=message.usage.input_tokens,
         output_tokens=message.usage.output_tokens,
+        cached_tokens=cached_tokens,
     )
 
 
@@ -132,8 +147,6 @@ async def _call_openai_compatible(
 
     text = data["choices"][0]["message"]["content"]
     if text is None:
-        # Some OpenAI-compatible endpoints (e.g. Qwen via CerebraAI) return null content
-        # when the model stops for reasons other than "stop" (e.g. length, tool_calls).
         finish_reason = data["choices"][0].get("finish_reason", "unknown")
         log.warning(
             "llm_null_content",
@@ -147,4 +160,5 @@ async def _call_openai_compatible(
         text=text,
         input_tokens=usage.get("prompt_tokens", 0),
         output_tokens=usage.get("completion_tokens", 0),
+        cached_tokens=0,
     )

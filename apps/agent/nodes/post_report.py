@@ -1,4 +1,4 @@
-"""Node 9: Save results to DB and post PR comment."""
+"""Node 9: Save results to DB, consume billing, publish execution summary, post PR comment."""
 from __future__ import annotations
 
 import shutil
@@ -7,11 +7,52 @@ from datetime import datetime, timezone
 
 import structlog
 
-from apps.agent.nodes.base import publish_progress, publish_thought, publish_cost_update, publish_done
+from apps.agent.nodes.base import (
+    publish_analysis_event,
+    publish_progress,
+    publish_thought,
+    publish_cost_update,
+    publish_done,
+)
 from apps.agent.nodes.finding_snippets import enrich_findings_code_snippets
 from apps.agent.schemas import AgentState
 
 log = structlog.get_logger(__name__)
+
+
+def build_execution_summary(state: AgentState) -> dict:
+    """Assemble full execution receipt from agent state token_usage."""
+    usage = state.get("token_usage") or {}
+    scores = state.get("efficiency_scores", {})
+    findings = state.get("findings", [])
+    by_node = usage.get("by_node", {})
+    provider = state.get("request", {}).get("llm_provider", "anthropic")
+
+    return {
+        "token_breakdown": {
+            "input_tokens": usage.get("input_tokens", 0),
+            "output_tokens": usage.get("output_tokens", 0),
+            "cached_tokens": usage.get("cached_tokens", 0),
+            "llm_calls": usage.get("llm_calls", 0),
+            "by_node": by_node,
+        },
+        "cost_breakdown": {
+            "llm_cost_usd": usage.get("cost_usd", 0.0),
+            "llm_provider": provider,
+        },
+        "findings_summary": {
+            "total": len(findings),
+            "critical": sum(1 for f in findings if f.get("severity") == "critical"),
+            "warning": sum(1 for f in findings if f.get("severity") == "warning"),
+            "info": sum(1 for f in findings if f.get("severity") == "info"),
+        },
+        "scores": {
+            "global": scores.get("global_score"),
+            "metrics": scores.get("metrics"),
+            "logs": scores.get("logs"),
+            "traces": scores.get("traces"),
+        },
+    }
 
 
 async def post_report_node(state: AgentState) -> dict:
@@ -27,13 +68,45 @@ async def post_report_node(state: AgentState) -> dict:
     previous_job_id = state.get("previous_job_id")
     crossrun_summary = state.get("crossrun_summary")
 
-    # LLMs often omit code_before; fill from line_start..line_end while repo is still on disk.
     enrich_findings_code_snippets(findings, state)
+
+    # Build execution summary
+    exec_summary = build_execution_summary(state)
+
+    # Consume billing with real token counts
+    cost_breakdown: dict = {}
+    try:
+        from apps.api.billing.billing_gate import BillingGate
+        billing = BillingGate()
+
+        request = state.get("request", {})
+        reservation_token = request.get("reservation_token") or request.get("billing_token") or ""
+        provider = request.get("llm_provider", "anthropic")
+
+        files_analyzed = len([f for f in (state.get("changed_files") or []) if isinstance(f, dict)])
+
+        if reservation_token:
+            cost_breakdown = await billing.consume(
+                reservation_token=reservation_token,
+                job_id=job_id,
+                tenant_id=tenant_id,
+                total_input_tokens=token_usage.get("input_tokens", 0),
+                total_output_tokens=token_usage.get("output_tokens", 0),
+                total_cached_tokens=token_usage.get("cached_tokens", 0),
+                files_analyzed=files_analyzed,
+                rag_chunks_retrieved=0,
+                llm_provider=provider,
+            )
+    except Exception as billing_err:
+        log.error("billing_consume_failed", job_id=job_id, error=str(billing_err))
+
+    if cost_breakdown:
+        exec_summary["cost_breakdown"] = cost_breakdown
 
     try:
         await _save_to_db(
             job_id, tenant_id, findings, scores, token_usage,
-            previous_job_id, crossrun_summary,
+            previous_job_id, crossrun_summary, cost_breakdown=cost_breakdown,
         )
     except Exception as e:
         log.error("save_to_db_failed", job_id=job_id, error=str(e))
@@ -53,12 +126,21 @@ async def post_report_node(state: AgentState) -> dict:
         log.info("repo_cleaned_up", path=state["repo_path"])
 
     score_global = scores.get("global_score")
+
+    # Publish execution_summary SSE event before done
+    await publish_analysis_event(
+        job_id, tenant_id, "done", 100,
+        "Execution summary ready",
+        event_type="execution_summary",
+        extra=exec_summary,
+    )
+
     await publish_thought(
         state, "post_report",
         f"Results saved — {len(findings)} findings, global score {score_global}/100",
         status="done",
     )
-    await publish_cost_update(state)
+    await publish_cost_update(state, node="post_report")
     await publish_done(state, score_global=score_global)
     return {"stage": "done", "progress_pct": 100}
 
@@ -71,13 +153,13 @@ async def _save_to_db(
     token_usage: dict,
     previous_job_id: str | None = None,
     crossrun_summary: dict | None = None,
+    cost_breakdown: dict | None = None,
 ) -> None:
     from sqlalchemy import select
 
     from apps.api.core.database import get_session_with_tenant
     from apps.api.models.analysis import AnalysisJob, AnalysisResult, Finding
 
-    # RLS + commit on exit — plain AsyncSessionFactory() neither set tenant nor committed.
     async with get_session_with_tenant(tenant_id) as session:
         job_result = await session.execute(
             select(AnalysisJob).where(AnalysisJob.id == uuid.UUID(job_id))
@@ -88,7 +170,8 @@ async def _save_to_db(
 
         job.status = "completed"
         job.completed_at = datetime.now(timezone.utc)
-        job.credits_consumed = job.credits_reserved
+        if not job.credits_consumed:
+            job.credits_consumed = job.credits_reserved
 
         summary_db: dict | None = None
         if crossrun_summary:
@@ -116,11 +199,11 @@ async def _save_to_db(
             input_tokens_total=token_usage.get("input_tokens", 0),
             output_tokens_total=token_usage.get("output_tokens", 0),
             cost_usd=token_usage.get("cost_usd", 0),
+            cost_breakdown=cost_breakdown or {},
         )
         session.add(result)
         await session.flush()
 
-        # Insert each Finding row and collect the assigned UUIDs
         finding_ids: list[uuid.UUID] = []
         for f in findings:
             finding = Finding(
@@ -140,7 +223,6 @@ async def _save_to_db(
             session.add(finding)
             finding_ids.append(finding.id)
 
-        # Flush so Finding.id is populated, then embed IDs into JSONB snapshot
         await session.flush()
         enriched: list[dict] = []
         for finding_id, f in zip(finding_ids, findings):
@@ -149,7 +231,6 @@ async def _save_to_db(
 
     log.info("results_saved_to_db", job_id=job_id, findings_count=len(findings))
 
-    # Trigger background ingestion of analysis history for the feedback flywheel
     try:
         from apps.agent.tasks.ingest_analysis_history import ingest_analysis_history
         ingest_analysis_history.delay(job_id)
@@ -168,7 +249,7 @@ async def _post_pr_comment(request: dict, findings: list[dict], scores: dict) ->
 
     cost_impact = sum(f.get("estimated_monthly_cost_impact", 0) for f in findings)
 
-    report = f"""## 🔍 Lumis Observability Analysis
+    report = f"""## 🔍 Horion Observability Analysis
 
 **Global Score: {global_score}/100 (Grade {grade})**
 
@@ -194,7 +275,7 @@ async def _post_pr_comment(request: dict, findings: list[dict], scores: dict) ->
             report += f"\n<details><summary>Suggested fix</summary>\n\n```\n{f['suggestion']}\n```\n</details>\n"
         report += "\n"
 
-    report += "\n---\n*Powered by [Lumis](https://lumis.dev) — Illuminate what's invisible in your code.*"
+    report += "\n---\n*Powered by [Horion](https://horion.pro) — Reliability Engineering Platform.*"
 
     installation_id = request.get("installation_id")
     full_name = request.get("repo_full_name")

@@ -98,7 +98,7 @@ async def generate_suggestions_node(state: AgentState) -> dict:
         f"Generated code fix suggestions for {min(len(actionable), cap)} finding(s)",
         status="done",
     )
-    await publish_cost_update(state)
+    await publish_cost_update(state, node="generate_suggestions")
     await publish_progress(state, "generating", 88, "Code suggestions generated.", stage_index=8)
     return {"findings": updated_findings}
 
@@ -298,6 +298,7 @@ Return ONLY the JSON array, no markdown fences."""
         latency_ms=latency_ms,
         findings_count=len(findings),
         prompt_version=PROMPT_VERSION,
+        cached_tokens=getattr(resp, "cached_tokens", 0),
     )
     log.info(
         "suggestion_generated",

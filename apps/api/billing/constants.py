@@ -1,13 +1,17 @@
 """Shared billing constants (overage USD per credit by plan)."""
 from __future__ import annotations
 
-# Align with apps/api/routers/billing.py OVERAGE_RATES — free uses starter-equivalent rate
+# Legacy credit-based overage rates (kept for backwards compat)
 OVERAGE_RATES_USD_PER_CREDIT: dict[str, float] = {
     "free": 0.35,
     "starter": 0.35,
     "growth": 0.25,
     "scale": 0.15,
     "enterprise": 0.15,
+}
+
+LEGACY_ANALYSIS_COSTS: dict[str, int] = {
+    "quick": 1, "full": 3, "repository": 15, "context": 0,
 }
 
 
