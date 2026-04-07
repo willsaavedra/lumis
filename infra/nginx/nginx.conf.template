@@ -70,16 +70,6 @@ server {
     add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With" always;
     add_header Access-Control-Expose-Headers "Content-Type" always;
 
-    # Preflight: respond immediately — no need to hit the upstream.
-    # `if` at server level is valid; the simple `return` makes it safe.
-    if ($request_method = OPTIONS) {
-        add_header Access-Control-Allow-Origin  $cors_origin always;
-        add_header Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS" always;
-        add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With" always;
-        add_header Access-Control-Max-Age       86400 always;
-        return 204;
-    }
-
     # Gzip
     gzip            on;
     gzip_types      application/json text/plain text/html;
@@ -123,6 +113,14 @@ server {
 
     # ── Fix-PR generation — long timeout (LLM writes code, opens PR) ────────
     location ~ ^/v1/analyses/[^/]+/fix-pr {
+        # OPTIONS preflight — add_header is valid inside a location if block
+        if ($request_method = OPTIONS) {
+            add_header Access-Control-Allow-Origin  $cors_origin always;
+            add_header Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS" always;
+            add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With" always;
+            add_header Access-Control-Max-Age       86400 always;
+            return 204;
+        }
         proxy_pass         http://api;
         proxy_read_timeout 1800s;
         proxy_send_timeout 120s;
@@ -130,6 +128,14 @@ server {
 
     # ── All other routes ─────────────────────────────────────────────────────
     location / {
+        # OPTIONS preflight for all API calls not matched by a specific location
+        if ($request_method = OPTIONS) {
+            add_header Access-Control-Allow-Origin  $cors_origin always;
+            add_header Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS" always;
+            add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With" always;
+            add_header Access-Control-Max-Age       86400 always;
+            return 204;
+        }
         proxy_pass           http://api;
         proxy_read_timeout   120s;
         proxy_send_timeout   30s;
