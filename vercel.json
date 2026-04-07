@@ -2,5 +2,6 @@
   "installCommand": "npm --prefix apps/web install",
   "buildCommand": "npm --prefix apps/web run build",
   "outputDirectory": "apps/web/.next",
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- apps/web"
 }
