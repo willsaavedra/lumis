@@ -16,7 +16,7 @@ dev-up: build up wait-healthy migrate seed
 	@echo "  Frontend: horion-frontend repo (Vercel)"
 
 up:
-	docker compose up -d --scale worker=$(WORKER_REPLICAS)
+	docker compose up -d --build --scale worker=$(WORKER_REPLICAS)
 
 down:
 	docker compose down

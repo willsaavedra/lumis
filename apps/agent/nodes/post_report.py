@@ -27,8 +27,9 @@ def build_execution_summary(state: AgentState) -> dict:
     findings = state.get("findings", [])
     by_node = usage.get("by_node", {})
     provider = state.get("request", {}).get("llm_provider", "anthropic")
+    manifest = state.get("analysis_manifest")
 
-    return {
+    summary = {
         "token_breakdown": {
             "input_tokens": usage.get("input_tokens", 0),
             "output_tokens": usage.get("output_tokens", 0),
@@ -53,6 +54,11 @@ def build_execution_summary(state: AgentState) -> dict:
             "traces": scores.get("traces"),
         },
     }
+
+    if manifest:
+        summary["completeness"] = manifest
+
+    return summary
 
 
 async def post_report_node(state: AgentState) -> dict:

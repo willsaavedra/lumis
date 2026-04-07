@@ -111,6 +111,8 @@ async def parse_ast_node(state: AgentState) -> dict:
     )
     await publish_progress(state, "parsing", 35, f"Found {len(call_graph.nodes)} code nodes.", stage_index=3)
 
+    summary = generate_call_graph_summary(call_graph)
+
     return {
         "call_graph": {
             "nodes": {
@@ -128,6 +130,7 @@ async def parse_ast_node(state: AgentState) -> dict:
             "io_nodes": call_graph.io_nodes,
             "error_paths": call_graph.error_paths,
             "file_obs_imports": file_obs_imports,
+            "summary": summary,
         }
     }
 
@@ -255,3 +258,97 @@ def _classify_js_function(name: str, context: str) -> str:
     if any(k in ctx_lower for k in ("kafka", "publish(", "produce(", "sqs.")):
         return "queue"
     return "utility"
+
+
+# ---------------------------------------------------------------------------
+# Call graph summary generation (injected into all batch prompts)
+# ---------------------------------------------------------------------------
+
+_NODE_TYPE_LABEL = {
+    "handler": "HTTP/gRPC handler",
+    "db_call": "database call",
+    "http_client": "external HTTP call",
+    "cache": "cache operation",
+    "queue": "message queue",
+    "utility": "utility",
+}
+
+
+def generate_call_graph_summary(call_graph: CallGraph, max_tokens: int = 6000) -> str:
+    """
+    Produce a compact text summary of the call graph for injection into
+    LLM batch prompts. Covers entry points, I/O nodes, critical call chains,
+    and external dependencies. Stays within `max_tokens` estimated budget.
+    """
+    lines: list[str] = ["## Service Call Graph (shared context)"]
+    budget_chars = max_tokens * 4
+
+    # Entry points
+    if call_graph.entry_points:
+        lines.append("\n### Entry points")
+        for ep_key in call_graph.entry_points[:30]:
+            node = call_graph.nodes.get(ep_key)
+            if not node:
+                continue
+            callees_str = ""
+            if node.callees:
+                callee_names = []
+                for ck in node.callees[:5]:
+                    cn = call_graph.nodes.get(ck)
+                    if cn:
+                        label = _NODE_TYPE_LABEL.get(cn.node_type, cn.node_type)
+                        callee_names.append(f"{cn.name} [{label}]")
+                callees_str = " → " + " → ".join(callee_names)
+            lines.append(f"  {node.file_path}: {node.name}(){callees_str}")
+
+    # I/O nodes (DB, HTTP client, queue, cache)
+    if call_graph.io_nodes:
+        lines.append("\n### I/O nodes (need spans for observability)")
+        for io_key in call_graph.io_nodes[:40]:
+            node = call_graph.nodes.get(io_key)
+            if not node:
+                continue
+            label = _NODE_TYPE_LABEL.get(node.node_type, node.node_type)
+            callers_str = ""
+            if node.callers:
+                caller_names = [
+                    call_graph.nodes[ck].name
+                    for ck in node.callers[:3]
+                    if ck in call_graph.nodes
+                ]
+                if caller_names:
+                    callers_str = f" (called by: {', '.join(caller_names)})"
+            lines.append(f"  {node.file_path}: {node.name}() [{label}]{callers_str}")
+
+    # Critical chains: entry point → I/O node paths
+    io_set = set(call_graph.io_nodes)
+    chains: list[str] = []
+    for ep_key in call_graph.entry_points[:15]:
+        ep_node = call_graph.nodes.get(ep_key)
+        if not ep_node:
+            continue
+        for callee_key in ep_node.callees:
+            if callee_key in io_set:
+                callee = call_graph.nodes.get(callee_key)
+                if callee:
+                    chains.append(
+                        f"  {ep_node.name}() → {callee.name}() "
+                        f"[{_NODE_TYPE_LABEL.get(callee.node_type, '')}]"
+                    )
+    if chains:
+        lines.append("\n### Critical paths (entry point → I/O)")
+        lines.extend(chains[:20])
+
+    # Files with functions
+    files_with_nodes: dict[str, int] = {}
+    for node in call_graph.nodes.values():
+        files_with_nodes[node.file_path] = files_with_nodes.get(node.file_path, 0) + 1
+    if files_with_nodes:
+        lines.append(f"\n### Files indexed: {len(files_with_nodes)} files, "
+                      f"{len(call_graph.nodes)} functions total")
+
+    summary = "\n".join(lines)
+    if len(summary) > budget_chars:
+        summary = summary[:budget_chars] + "\n... (truncated)"
+
+    return summary

@@ -56,6 +56,9 @@ class AgentSettings(BaseSettings):
             return DEFAULT_DATABASE_URL
         return v
 
+    # Batch analysis
+    max_concurrent_batches: int = 4
+
     # Datadog (optional)
     dd_api_key: str = ""
     dd_app_key: str = ""

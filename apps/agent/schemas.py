@@ -179,3 +179,4 @@ class AgentState(TypedDict):
     previous_job_id: str | None
     crossrun_summary: dict | None
     rag_context: str | None
+    analysis_manifest: dict | None

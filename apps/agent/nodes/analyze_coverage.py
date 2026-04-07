@@ -7,6 +7,7 @@ import re
 import time
 import structlog
 
+from apps.agent.core.config import settings
 from apps.agent.nodes.base import (
     publish_progress, publish_llm_call_started, log_llm_call,
     publish_thought, publish_finding, publish_file_status, publish_cost_update,
@@ -639,7 +640,14 @@ async def analyze_coverage_node(state: AgentState) -> dict:
             source=_gate_instr["source"],
         )
 
-    # LLM semantic analysis — respects per-type file limit
+    # ------------------------------------------------------------------
+    # LLM semantic analysis — token-aware batching + parallel execution
+    # ------------------------------------------------------------------
+    from apps.agent.llm.token_budget import compute_batches, estimate_tokens
+    from apps.agent.llm.file_chunker import chunk_file
+    from apps.agent.llm.batch_runner import BatchRunner
+    from apps.agent.manifest import AnalysisManifest
+
     min_score = 2 if analysis_type == "quick" else 1
     relevant_files = [
         f for f in state["changed_files"]
@@ -648,94 +656,192 @@ async def analyze_coverage_node(state: AgentState) -> dict:
 
     file_limit = cfg["file_limit"]
     content_chars = cfg["content_chars"]
-    batch_size = int(cfg.get("batch_size") or 5)
+    capped = relevant_files[:file_limit]
 
-    if relevant_files:
-        capped = relevant_files[:file_limit]
-        batches: list[list[dict]]
-        if len(capped) > batch_size:
-            batches = [capped[i : i + batch_size] for i in range(0, len(capped), batch_size)]
+    manifest = AnalysisManifest(capped)
+
+    if capped:
+        # Resolve the model name for budget calculation
+        provider = state.get("request", {}).get("llm_provider", "anthropic")
+        if provider == "cerebra_ai":
+            _model = settings.cerebra_ai_model_primary if cfg["use_primary_model"] else settings.cerebra_ai_model_triage
         else:
-            batches = [capped]
+            _model = settings.anthropic_model_primary if cfg["use_primary_model"] else settings.anthropic_model_triage
 
-        files_done = 0
-        for batch_idx, batch in enumerate(batches):
-            batch_paths = [b["path"] for b in batch]
+        call_graph_tokens = estimate_tokens(
+            json.dumps(state.get("call_graph") or {})[:6000]
+        )
+
+        batch_plan = compute_batches(capped, _model, call_graph_tokens)
+
+        # Chunk oversized files and add them as additional batches
+        for oversized in batch_plan.oversized_files:
+            chunks = chunk_file(oversized, batch_plan.budget_per_batch)
+            manifest.mark_chunked(oversized.get("path", ""), len(chunks))
+            for chunk in chunks:
+                batch_plan.batches.append([chunk])
+
+        manifest.total_batches = len(batch_plan.batches)
+        all_batches = batch_plan.batches
+
+        # Mark all files in manifest
+        for batch_idx, batch in enumerate(all_batches):
+            for f in batch:
+                manifest.mark_batched(f.get("path", ""), batch_idx)
+
+        # Shared state captured for the analyze function
+        _state = state
+        _content_chars = content_chars
+        _use_primary = cfg["use_primary_model"]
+        _cov_map = coverage_map
+        _file_obs = file_obs_imports
+        _all_batch_paths = [
+            [f.get("path", "") for f in batch]
+            for batch in all_batches
+        ]
+
+        files_done_counter = {"count": 0}
+
+        async def _analyze_batch(batch: list[dict]) -> list[dict]:
+            """Wrapper that calls the existing LLM analysis function."""
             for b in batch:
-                await publish_file_status(state, b["path"], "scanning", b.get("language") or "")
+                await publish_file_status(_state, b["path"], "scanning", b.get("language") or "")
+                manifest.mark_analyzing(b.get("path", ""))
 
-            try:
-                llm_findings = await _llm_analyze_coverage(
-                    batch,
-                    state,
-                    content_chars=content_chars,
-                    use_primary_model=cfg["use_primary_model"],
-                    coverage_map=coverage_map,
-                    file_obs_imports=file_obs_imports,
-                )
-                accepted = 0
-                rejected = 0
-                for f in llm_findings:
-                    if f.get("confidence", "medium") != "low":
-                        findings.append(f)
-                        accepted += 1
-                        await publish_finding(state, f, "analyze_coverage")
-                        log.debug(
-                            "finding_accepted",
-                            file=f.get("file_path"),
-                            pillar=f.get("pillar"),
-                            severity=f.get("severity"),
-                            confidence=f.get("confidence", "medium"),
-                            job_id=state.get("job_id"),
-                        )
-                    else:
-                        rejected += 1
-                        log.debug(
-                            "finding_rejected",
-                            file=f.get("file_path"),
-                            pillar=f.get("pillar"),
-                            reason="low_confidence",
-                            job_id=state.get("job_id"),
-                        )
+            return await _llm_analyze_coverage(
+                batch,
+                _state,
+                content_chars=_content_chars,
+                use_primary_model=_use_primary,
+                coverage_map=_cov_map,
+                file_obs_imports=_file_obs,
+            )
 
-                files_done += len(batch)
-                for b in batch:
-                    await publish_file_status(state, b["path"], "done", b.get("language") or "")
+        async def _on_batch_complete(result) -> None:
+            """Callback fired after each batch — updates manifest + SSE."""
+            batch_files = result.files
+            batch_findings = result.findings
 
-                pct = 50 + int((files_done / len(capped)) * 10) if capped else 55
-                await publish_progress(
-                    state, "analyzing", min(pct, 59),
-                    f"Batch {batch_idx + 1}/{len(batches)} — {accepted} findings",
-                    stage_index=5, files_analyzed=files_done, files_total=len(capped),
-                    current_file=batch_paths[-1] if batch_paths else None,
+            if result.error:
+                for b in batch_files:
+                    manifest.mark_failed(b.get("path", ""), result.error)
+                    await publish_file_status(_state, b["path"], "done", b.get("language") or "")
+                manifest.record_retry()
+                log.warning(
+                    "llm_coverage_analysis_failed",
+                    error=result.error,
+                    batch_size=len(batch_files),
+                    job_id=_state.get("job_id"),
                 )
-                await publish_thought(
-                    state, "analyze_coverage",
-                    f"Analyzed batch {batch_idx + 1} ({len(batch)} files): {accepted} findings accepted, {rejected} filtered",
-                    status="active" if batch_idx < len(batches) - 1 else "done",
-                    files=batch_paths,
-                )
-                await publish_cost_update(state, node="analyze_coverage")
+                return
 
-                log.info(
-                    "coverage_batch_result",
-                    batch_index=batch_idx,
-                    files_in_batch=len(batch),
-                    findings_accepted=accepted,
-                    findings_rejected=rejected,
-                    job_id=state.get("job_id"),
+            # Process findings
+            accepted = 0
+            rejected = 0
+            files_with_findings: set[str] = set()
+            for f in batch_findings:
+                if f.get("confidence", "medium") != "low":
+                    findings.append(f)
+                    accepted += 1
+                    files_with_findings.add(f.get("file_path", ""))
+                    await publish_finding(_state, f, "analyze_coverage")
+                else:
+                    rejected += 1
+
+            # Update manifest for each file in the batch
+            for b in batch_files:
+                path = b.get("path", "")
+                file_finding_count = sum(
+                    1 for f in batch_findings
+                    if f.get("file_path") == path and f.get("confidence", "medium") != "low"
                 )
-            except Exception as e:
-                files_done += len(batch)
-                for b in batch:
-                    await publish_file_status(state, b["path"], "done", b.get("language") or "")
-                log.warning("llm_coverage_analysis_failed", error=str(e), batch_size=len(batch))
+                manifest.mark_completed(path, file_finding_count)
+                await publish_file_status(_state, path, "done", b.get("language") or "")
+
+            files_done_counter["count"] += len(batch_files)
+            files_done = files_done_counter["count"]
+
+            pct = 50 + int((files_done / len(capped)) * 10) if capped else 55
+            await publish_progress(
+                _state, "analyzing", min(pct, 59),
+                f"Batch {result.batch_index + 1}/{len(all_batches)} — {accepted} findings",
+                stage_index=5, files_analyzed=files_done, files_total=len(capped),
+            )
+            await publish_thought(
+                _state, "analyze_coverage",
+                f"Analyzed batch {result.batch_index + 1} ({len(batch_files)} files): "
+                f"{accepted} findings accepted, {rejected} filtered",
+                status="active" if files_done < len(capped) else "done",
+                files=[b.get("path", "") for b in batch_files],
+            )
+            await publish_cost_update(_state, node="analyze_coverage")
+
+            log.info(
+                "coverage_batch_result",
+                batch_index=result.batch_index,
+                files_in_batch=len(batch_files),
+                findings_accepted=accepted,
+                findings_rejected=rejected,
+                job_id=_state.get("job_id"),
+            )
+
+        # Execute all batches with parallel runner
+        runner = BatchRunner(
+            max_concurrent=settings.max_concurrent_batches,
+            max_retries=3,
+        )
+        await runner.run_all(all_batches, _analyze_batch, _on_batch_complete)
+
+        # Output validation: re-analyze files stuck in non-terminal state
+        # (LLM output may have been truncated, omitting some files)
+        stuck_files = [
+            f for f in capped
+            if manifest._files.get(f.get("path", ""), None)
+            and manifest._files[f["path"]].status not in ("completed", "failed", "skipped_triage")
+        ]
+        if stuck_files:
+            log.warning(
+                "output_validation_reanalysis",
+                stuck_count=len(stuck_files),
+                paths=[f["path"] for f in stuck_files[:10]],
+                job_id=state.get("job_id"),
+            )
+            # Re-analyze in small batches of 2 files
+            for i in range(0, len(stuck_files), 2):
+                mini_batch = stuck_files[i:i + 2]
+                try:
+                    retry_findings = await _analyze_batch(mini_batch)
+                    from apps.agent.llm.batch_runner import BatchResult
+                    await _on_batch_complete(BatchResult(
+                        batch_index=len(all_batches) + i,
+                        files=mini_batch,
+                        findings=retry_findings,
+                    ))
+                except Exception as e:
+                    for mb in mini_batch:
+                        manifest.mark_failed(mb.get("path", ""), f"reanalysis_failed: {e}")
+
+        # Completeness guarantee — mark silently skipped files as failed
+        manifest.assert_complete()
+
+        log.info(
+            "coverage_manifest",
+            coverage_pct=manifest.coverage_pct,
+            eligible=manifest.eligible_count,
+            completed=manifest.completed_count,
+            failed=len(manifest.failed_files),
+            job_id=state.get("job_id"),
+        )
 
     await publish_progress(
         state, "analyzing", 60, f"Found {len(findings)} initial findings.",
-        stage_index=5, files_analyzed=len(relevant_files[:file_limit]),
+        stage_index=5, files_analyzed=len(capped),
     )
-    return {"findings": findings, "coverage_map": coverage_map}
+    return {
+        "findings": findings,
+        "coverage_map": coverage_map,
+        "analysis_manifest": manifest.to_completeness_report() if capped else None,
+    }
 
 
 async def _llm_analyze_coverage(
@@ -760,7 +866,6 @@ async def _llm_analyze_coverage(
     use_primary_model=True  → settings.anthropic_model_primary (Sonnet)
     use_primary_model=False → settings.anthropic_model_triage  (Haiku)
     """
-    from apps.agent.core.config import settings
     from apps.agent.llm.chat_completion import chat_complete
 
     provider = state.get("request", {}).get("llm_provider", "anthropic")
@@ -791,6 +896,8 @@ async def _llm_analyze_coverage(
         header = f"File: {f['path']} | Language: {lang} | Obs-imports: {obs_import}"
         if framework:
             header += f" | Framework: {framework}"
+        if f.get("_is_chunk"):
+            header += f" | CHUNK {f['_chunk_index'] + 1}/{f['_chunk_total']} (analyze only functions shown in full)"
         file_summaries.append(f"{header}\n```{lang}\n{content}\n```")
 
     files_text = "\n\n".join(file_summaries)
@@ -893,6 +1000,10 @@ async def _llm_analyze_coverage(
     rag_context = state.get("rag_context") or ""
     rag_section = f"\n\n{rag_context}" if rag_context else ""
 
+    # Inject call graph summary (shared across all batches — cacheable)
+    cg_summary = (state.get("call_graph") or {}).get("summary", "")
+    call_graph_section = f"\n\n{cg_summary}" if cg_summary else ""
+
     # Hard constraint: keep all suggestions aligned with the declared instrumentation / repo type
     instr_constraint = constraint_section(instrumentation, obs_backend)
     iac_constraint = _iac_constraint_section(
@@ -901,7 +1012,7 @@ async def _llm_analyze_coverage(
         language if isinstance(language, list) else ([language] if language else []),
     )
 
-    system_prompt = f"""You are an expert SRE auditing code for observability gaps (prompt version: {PROMPT_VERSION}).{rag_section}{iac_constraint}{instr_constraint}
+    system_prompt = f"""You are an expert SRE auditing code for observability gaps (prompt version: {PROMPT_VERSION}).{rag_section}{call_graph_section}{iac_constraint}{instr_constraint}
 
 ## Mandatory Reasoning Framework
 Before reporting ANY finding, internally answer all four questions:

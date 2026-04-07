@@ -260,6 +260,7 @@ async def run_analysis_graph(job_id: str) -> None:
             "previous_job_id": None,
             "crossrun_summary": None,
             "rag_context": None,
+            "analysis_manifest": None,
         }
 
         # Run graph
