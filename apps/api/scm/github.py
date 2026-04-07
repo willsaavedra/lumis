@@ -19,6 +19,25 @@ log = structlog.get_logger(__name__)
 GITHUB_API = "https://api.github.com"
 
 
+def _read_github_app_private_key(path_str: str) -> str:
+    """Load PEM from a file path, or from the first file inside a directory (K8s/docker secret mounts)."""
+    p = Path(path_str)
+    if p.is_file():
+        return p.read_text()
+    if p.is_dir():
+        # e.g. Kubernetes mounts the secret as a directory with an arbitrary filename inside
+        preferred = ("key", "private-key", "ssh-privatekey", "tls.key", "github_private_key.pem")
+        for name in preferred:
+            candidate = p / name
+            if candidate.is_file():
+                return candidate.read_text()
+        files = sorted([x for x in p.iterdir() if x.is_file()])
+        if not files:
+            raise ValueError(f"GitHub App private key path is a directory with no files: {path_str}")
+        return files[0].read_text()
+    raise FileNotFoundError(f"GitHub App private key path not found: {path_str}")
+
+
 class GitHubTokenManager:
     """Generate and cache GitHub App installation tokens."""
 
@@ -62,8 +81,7 @@ class GitHubTokenManager:
         if not settings.github_app_id or not settings.github_app_private_key_path:
             raise ValueError("GitHub App credentials not configured.")
 
-        with open(settings.github_app_private_key_path) as f:
-            private_key = f.read()
+        private_key = _read_github_app_private_key(settings.github_app_private_key_path)
 
         now = int(time.time())
         payload = {

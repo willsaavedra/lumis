@@ -53,7 +53,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./lumis-local-dev.2026-04-01.private-key.pem:/run/secrets/github_private_key:ro
+      - ./horion-git-hub.pem:/run/secrets/github_private_key:ro
     environment:
       - DATABASE_URL=postgresql+asyncpg://sre:ij9fnwns9invasd@postgres:5432/horion
       - REDIS_URL=redis://redis:6379/0
