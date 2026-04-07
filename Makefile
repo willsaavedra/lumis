@@ -1,6 +1,6 @@
 .PHONY: dev-up up down build logs logs-api logs-agent logs-worker \
         shell-api shell-db migrate migration seed test test-api test-agent \
-        analyze k8s-deploy k8s-logs clean stripe-listen stripe-fixture
+        analyze web-deploy web-build-cf k8s-deploy k8s-logs clean stripe-listen stripe-fixture
 
 # ── Development ─────────────────────────────────────────────────────────────
 
@@ -84,6 +84,17 @@ stripe-fixture:
 	@echo "Creating Stripe products, prices, and meter..."
 	python scripts/stripe_setup.py
 	@echo "Copy the printed values into your .env.local"
+
+# ── Frontend (CloudFront) ─────────────────────────────────────────────────────
+
+web-deploy:
+	@echo "Building static export for CloudFront…"
+	cd apps/web && npm run deploy:cf
+	@echo "✓ Deployed to s3://ai.horion.pro and invalidated CloudFront cache"
+
+web-build-cf:
+	@echo "Building static export (out/)…"
+	cd apps/web && npm run build:cf
 
 # ── Kubernetes ───────────────────────────────────────────────────────────────
 
