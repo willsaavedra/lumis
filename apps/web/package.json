@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:cf": "NEXT_OUTPUT=export next build",
+    "build:cf": "NEXT_OUTPUT=export NEXT_PUBLIC_API_URL=https://api.horion.pro next build",
     "start": "next start",
     "lint": "eslint . --ext .ts,.tsx",
     "deploy:cf": "npm run build:cf && aws s3 sync out/ s3://ai.horion.pro --delete --region us-east-1 && aws cloudfront create-invalidation --region us-east-1 --distribution-id E1SZTLANRZNZ9 --paths '/*'"

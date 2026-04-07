@@ -4,6 +4,13 @@
 # are left untouched because envsubst is called with the explicit var list.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# CORS: pass the origin through only if it matches the allowed frontend.
+# Empty string → header is suppressed by nginx (not sent to client).
+map $http_origin $cors_origin {
+    "https://ai.horion.pro" "https://ai.horion.pro";
+    default                 "";
+}
+
 upstream api {
     server api:8000;
     keepalive 32;
@@ -56,6 +63,23 @@ server {
     add_header X-Frame-Options           "DENY"                                         always;
     add_header X-XSS-Protection          "1; mode=block"                                always;
 
+    # CORS — inherited by all locations that don't define their own add_header.
+    # Locations that do (e.g. SSE) must repeat these explicitly.
+    add_header Access-Control-Allow-Origin  $cors_origin always;
+    add_header Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS" always;
+    add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With" always;
+    add_header Access-Control-Expose-Headers "Content-Type" always;
+
+    # Preflight: respond immediately — no need to hit the upstream.
+    # `if` at server level is valid; the simple `return` makes it safe.
+    if ($request_method = OPTIONS) {
+        add_header Access-Control-Allow-Origin  $cors_origin always;
+        add_header Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With" always;
+        add_header Access-Control-Max-Age       86400 always;
+        return 204;
+    }
+
     # Gzip
     gzip            on;
     gzip_types      application/json text/plain text/html;
@@ -82,7 +106,12 @@ server {
         proxy_set_header   X-Forwarded-Proto $scheme;
         proxy_set_header   Connection        "";
         chunked_transfer_encoding on;
-        add_header         X-Accel-Buffering no always;
+        # This block defines its own add_header, so server-level ones are NOT inherited.
+        # Repeat all required headers explicitly.
+        add_header X-Accel-Buffering                no always;
+        add_header Access-Control-Allow-Origin      $cors_origin always;
+        add_header Access-Control-Allow-Methods     "GET, POST, PUT, PATCH, DELETE, OPTIONS" always;
+        add_header Access-Control-Allow-Headers     "Authorization, Content-Type, X-Requested-With" always;
     }
 
     # ── Webhooks — moderate timeout (background processing) ─────────────────
