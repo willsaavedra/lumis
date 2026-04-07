@@ -99,7 +99,7 @@ class TriggerAnalysisRequest(BaseModel):
             "no paths + context exists → full; no paths + no context → repository."
         ),
     )
-    llm_provider: Literal["anthropic", "cerebra_ai"] = "anthropic"
+    llm_provider: Literal["anthropic", "cerebra_ai"] = "cerebra_ai"
     changed_files: list[str] | None = Field(
         default=None,
         description="Paths relative to repo root (files or dirs). Required for quick; optional for full/repository.",
