@@ -5,7 +5,7 @@ import { reposApi, analysesApi, Repository, connectionsApi, type ScmConnection }
 import { RepoWebLink } from '@/components/RepoWebLink'
 import { ScmLogo } from '@/components/ScmLogo'
 import { formatDate } from '@/lib/utils'
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, type CSSProperties } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ExternalLink, Search } from 'lucide-react'
@@ -78,6 +78,46 @@ const EMPTY_CONTEXT: ContextForm = {
   environment: '',
   obs_kv: [],
   context_summary: '',
+}
+
+/** Horion — modal surfaces (no Tailwind colors; borders instead of shadows). */
+const hzOverlay: CSSProperties = { background: 'rgba(10, 10, 10, 0.55)' }
+const hzModalPanel: CSSProperties = {
+  background: 'var(--hz-bg)',
+  border: '1px solid var(--hz-rule)',
+  borderRadius: 'var(--hz-lg)',
+}
+const hzModalHeaderBar: CSSProperties = {
+  borderBottom: '1px solid var(--hz-rule)',
+  background: 'var(--hz-bg)',
+}
+const hzModalFooterBar: CSSProperties = {
+  borderTop: '1px solid var(--hz-rule)',
+  background: 'var(--hz-bg2)',
+}
+const hzDividerVert: CSSProperties = { borderLeft: '1px solid var(--hz-rule)' }
+
+function hzCardChoice(selected: boolean): CSSProperties {
+  return {
+    border: `1px solid ${selected ? 'var(--hz-ink)' : 'var(--hz-rule)'}`,
+    background: selected ? 'var(--hz-bg3)' : 'var(--hz-bg)',
+    color: 'var(--hz-ink)',
+  }
+}
+
+function hzChip(selected: boolean): CSSProperties {
+  return {
+    border: `1px solid ${selected ? 'var(--hz-ink)' : 'var(--hz-rule)'}`,
+    background: selected ? 'var(--hz-bg3)' : 'transparent',
+    color: selected ? 'var(--hz-ink)' : 'var(--hz-ink2)',
+  }
+}
+
+function hzStepDot(active: boolean): CSSProperties {
+  return {
+    background: active ? 'var(--hz-ink)' : 'var(--hz-bg4)',
+    color: active ? 'var(--hz-bg)' : 'var(--hz-muted)',
+  }
 }
 
 function buildObsMetadata(form: ContextForm): Record<string, unknown> | undefined {
@@ -713,21 +753,21 @@ export default function RepositoriesPage() {
               >
                 {/* Repo type */}
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">Repository type</label>
-                  <div className="grid grid-cols-4 gap-2">
+                  <label className="hz-label mb-2">Repository type</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {REPO_TYPES.map((t) => (
                       <button
                         key={t.value}
                         type="button"
                         onClick={() => setEditDraft((d) => ({ ...d, repo_type: d.repo_type === t.value ? '' : t.value, app_subtype: '', iac_provider: '' }))}
-                        className={`text-left p-2 rounded-lg border text-xs transition-colors ${
-                          editDraft.repo_type === t.value
-                            ? 'border-gray-900 dark:border-gray-100 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-                            : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
-                        }`}
+                        className="text-left p-2 rounded-md text-xs transition-none"
+                        style={{
+                          ...hzCardChoice(editDraft.repo_type === t.value),
+                          borderRadius: 'var(--hz-md)',
+                        }}
                       >
-                        <div className="font-medium">{t.label}</div>
-                        <div className="text-gray-400 dark:text-gray-500 text-[10px] mt-0.5">{t.description}</div>
+                        <div className="font-medium" style={{ color: 'var(--hz-ink)' }}>{t.label}</div>
+                        <div className="hz-micro mt-0.5" style={{ color: 'var(--hz-muted)' }}>{t.description}</div>
                       </button>
                     ))}
                   </div>
@@ -736,18 +776,15 @@ export default function RepositoriesPage() {
                 {/* App subtype */}
                 {editDraft.repo_type === 'app' && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">Application type</label>
+                    <label className="hz-label mb-2">Application type</label>
                     <div className="flex flex-wrap gap-2">
                       {APP_SUBTYPES.map((s) => (
                         <button
                           key={s.value}
                           type="button"
                           onClick={() => setEditDraft((d) => ({ ...d, app_subtype: d.app_subtype === s.value ? '' : s.value }))}
-                          className={`px-3 py-1 rounded text-xs border transition-colors ${
-                            editDraft.app_subtype === s.value
-                              ? 'border-gray-900 dark:border-gray-100 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-medium'
-                              : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400'
-                          }`}
+                          className="px-3 py-1 rounded-md text-xs font-medium transition-none"
+                          style={{ ...hzChip(editDraft.app_subtype === s.value), borderRadius: 'var(--hz-md)' }}
                         >{s.label}</button>
                       ))}
                     </div>
@@ -757,18 +794,15 @@ export default function RepositoriesPage() {
                 {/* IaC provider */}
                 {editDraft.repo_type === 'iac' && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">Cloud provider</label>
+                    <label className="hz-label mb-2">Cloud provider</label>
                     <div className="flex flex-wrap gap-2">
                       {IAC_PROVIDERS.map((p) => (
                         <button
                           key={p.value}
                           type="button"
                           onClick={() => setEditDraft((d) => ({ ...d, iac_provider: d.iac_provider === p.value ? '' : p.value }))}
-                          className={`px-3 py-1 rounded text-xs border transition-colors ${
-                            editDraft.iac_provider === p.value
-                              ? 'border-gray-900 dark:border-gray-100 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-medium'
-                              : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400'
-                          }`}
+                          className="px-3 py-1 rounded-md text-xs font-medium transition-none"
+                          style={{ ...hzChip(editDraft.iac_provider === p.value), borderRadius: 'var(--hz-md)' }}
                         >{p.label}</button>
                       ))}
                     </div>
@@ -777,7 +811,7 @@ export default function RepositoriesPage() {
 
                 {/* Language */}
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">Language(s)</label>
+                  <label className="hz-label mb-2">Language(s)</label>
                   <div className="flex flex-wrap gap-2">
                     {LANGUAGES.map((lang) => (
                       <button
@@ -787,11 +821,8 @@ export default function RepositoriesPage() {
                           ...d,
                           languages: d.languages.includes(lang) ? d.languages.filter((l) => l !== lang) : [...d.languages, lang],
                         }))}
-                        className={`px-3 py-1 rounded text-xs border transition-colors ${
-                          editDraft.languages.includes(lang)
-                            ? 'border-gray-900 dark:border-gray-100 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-medium'
-                            : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400'
-                        }`}
+                        className="px-3 py-1 rounded-md text-xs font-medium transition-none"
+                        style={{ ...hzChip(editDraft.languages.includes(lang)), borderRadius: 'var(--hz-md)' }}
                       >{lang}</button>
                     ))}
                   </div>
@@ -799,18 +830,15 @@ export default function RepositoriesPage() {
 
                 {/* Observability backend */}
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">Observability backend</label>
+                  <label className="hz-label mb-2">Observability backend</label>
                   <div className="flex flex-wrap gap-2">
                     {OBS_BACKENDS.map((b) => (
                       <button
                         key={b.value}
                         type="button"
                         onClick={() => setEditDraft((d) => ({ ...d, observability_backend: d.observability_backend === b.value ? '' : b.value, obs_kv: [] }))}
-                        className={`px-3 py-1 rounded text-xs border transition-colors ${
-                          editDraft.observability_backend === b.value
-                            ? 'border-gray-900 dark:border-gray-100 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-medium'
-                            : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400'
-                        }`}
+                        className="px-3 py-1 rounded-md text-xs font-medium transition-none"
+                        style={{ ...hzChip(editDraft.observability_backend === b.value), borderRadius: 'var(--hz-md)' }}
                       >{b.label}</button>
                     ))}
                   </div>
@@ -818,21 +846,18 @@ export default function RepositoriesPage() {
 
                 {/* Instrumentation */}
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">Instrumentation library</label>
-                  <div className="grid grid-cols-3 gap-2">
+                  <label className="hz-label mb-2">Instrumentation library</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {INSTRUMENTATIONS.map((inst) => (
                       <button
                         key={inst.value}
                         type="button"
                         onClick={() => setEditDraft((d) => ({ ...d, instrumentation: d.instrumentation === inst.value ? '' : inst.value }))}
-                        className={`text-left p-2 rounded-lg border text-xs transition-colors ${
-                          editDraft.instrumentation === inst.value
-                            ? 'border-gray-900 dark:border-gray-100 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-                            : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400'
-                        }`}
+                        className="text-left p-2 rounded-md text-xs transition-none"
+                        style={{ ...hzCardChoice(editDraft.instrumentation === inst.value), borderRadius: 'var(--hz-md)' }}
                       >
-                        <div className="font-medium">{inst.label}</div>
-                        <div className="text-gray-400 dark:text-gray-500 text-[10px] mt-0.5">{inst.description}</div>
+                        <div className="font-medium" style={{ color: 'var(--hz-ink)' }}>{inst.label}</div>
+                        <div className="hz-micro mt-0.5" style={{ color: 'var(--hz-muted)' }}>{inst.description}</div>
                       </button>
                     ))}
                   </div>
@@ -840,34 +865,36 @@ export default function RepositoriesPage() {
 
                 {/* Observability metadata */}
                 {editDraft.observability_backend && (
-                  <div className="space-y-3 pl-3 border-l-2 border-gray-200 dark:border-gray-700">
+                  <div className="space-y-3 pl-3" style={{ borderLeft: '2px solid var(--hz-rule)' }}>
                     <div className="flex gap-3">
                       <div className="flex-1">
-                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Service name</label>
+                        <label className="hz-label mb-1" style={{ display: 'block' }}>Service name</label>
                         <input
                           type="text"
                           value={editDraft.service_name}
                           onChange={(e) => setEditDraft((d) => ({ ...d, service_name: e.target.value }))}
                           placeholder="e.g. checkout-api"
-                          className="w-full px-2.5 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:border-gray-400"
+                          className="hz-inp w-full px-2.5 py-1.5 text-xs"
+                          style={{ color: 'var(--hz-ink)', borderRadius: 'var(--hz-md)' }}
                         />
                       </div>
                       <div className="flex-1">
-                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Environment</label>
+                        <label className="hz-label mb-1" style={{ display: 'block' }}>Environment</label>
                         <input
                           type="text"
                           value={editDraft.environment}
                           onChange={(e) => setEditDraft((d) => ({ ...d, environment: e.target.value }))}
                           placeholder="e.g. production"
-                          className="w-full px-2.5 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:border-gray-400"
+                          className="hz-inp w-full px-2.5 py-1.5 text-xs"
+                          style={{ color: 'var(--hz-ink)', borderRadius: 'var(--hz-md)' }}
                         />
                       </div>
                     </div>
                     {(editDraft.observability_backend === 'datadog' || editDraft.observability_backend === 'prometheus' || editDraft.observability_backend === 'grafana') && (
                       <div>
-                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                        <label className="hz-sm mb-1 block" style={{ color: 'var(--hz-ink2)' }}>
                           {editDraft.observability_backend === 'datadog' ? 'Datadog tags' : 'Prometheus / Grafana labels'}{' '}
-                          <span className="text-gray-400">(key → value pairs used to filter telemetry)</span>
+                          <span style={{ color: 'var(--hz-muted)' }}>(key → value pairs)</span>
                         </label>
                         <div className="space-y-1.5">
                           {editDraft.obs_kv.map((pair, i) => (
@@ -879,9 +906,10 @@ export default function RepositoriesPage() {
                                   const kv = [...d.obs_kv]; kv[i] = { ...kv[i], key: e.target.value }; return { ...d, obs_kv: kv }
                                 })}
                                 placeholder="key"
-                                className="w-28 px-2 py-1 text-xs border border-gray-200 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:border-gray-400"
+                                className="hz-inp w-28 px-2 py-1 text-xs"
+                                style={{ borderRadius: 'var(--hz-sm)' }}
                               />
-                              <span className="text-gray-400 text-xs">:</span>
+                              <span className="hz-sm" style={{ color: 'var(--hz-muted)' }}>:</span>
                               <input
                                 type="text"
                                 value={pair.value}
@@ -889,19 +917,23 @@ export default function RepositoriesPage() {
                                   const kv = [...d.obs_kv]; kv[i] = { ...kv[i], value: e.target.value }; return { ...d, obs_kv: kv }
                                 })}
                                 placeholder="value"
-                                className="flex-1 px-2 py-1 text-xs border border-gray-200 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:border-gray-400"
+                                className="hz-inp flex-1 px-2 py-1 text-xs"
+                                style={{ borderRadius: 'var(--hz-sm)' }}
                               />
                               <button
                                 type="button"
                                 onClick={() => setEditDraft((d) => ({ ...d, obs_kv: d.obs_kv.filter((_, j) => j !== i) }))}
-                                className="text-gray-400 hover:text-red-500 text-xs px-1"
+                                className="hz-sm px-1"
+                                style={{ color: 'var(--hz-muted)', background: 'transparent', border: 'none', cursor: 'pointer' }}
+                                title="Remove"
                               >✕</button>
                             </div>
                           ))}
                           <button
                             type="button"
                             onClick={() => setEditDraft((d) => ({ ...d, obs_kv: [...d.obs_kv, { key: '', value: '' }] }))}
-                            className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                            className="hz-sm"
+                            style={{ color: 'var(--hz-info)', background: 'transparent', border: 'none', cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: '2px' }}
                           >+ Add pair</button>
                         </div>
                       </div>
@@ -911,27 +943,31 @@ export default function RepositoriesPage() {
 
                 {/* Context summary */}
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">Context summary</label>
+                  <label className="hz-label mb-2">Context summary</label>
                   <textarea
                     value={editDraft.context_summary}
                     onChange={(e) => setEditDraft((d) => ({ ...d, context_summary: e.target.value }))}
                     rows={3}
                     placeholder="Brief description: what this repo does, service responsibilities, integrations..."
-                    className="w-full px-3 py-2 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 resize-none"
+                    className="hz-inp w-full px-3 py-2 text-xs resize-none"
+                    style={{ color: 'var(--hz-ink)', borderRadius: 'var(--hz-md)', minHeight: '72px' }}
                   />
                 </div>
 
                 <div className="flex gap-2 pt-1">
                   <button
+                    type="button"
                     onClick={() => saveContextMutation.mutate({ id: repo.id, draft: editDraft })}
                     disabled={saveContextMutation.isPending}
-                    className="px-3 py-1.5 text-xs bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-lg font-medium hover:bg-gray-700 dark:hover:bg-gray-300 disabled:opacity-50"
+                    className="hz-btn hz-btn-primary text-xs px-3 py-1.5 disabled:opacity-50"
                   >
                     {saveContextMutation.isPending ? 'Saving...' : 'Save'}
                   </button>
                   <button
+                    type="button"
                     onClick={() => setEditingContextId(null)}
-                    className="px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                    className="hz-btn hz-btn-ghost text-xs px-3 py-1.5"
+                    style={{ color: 'var(--hz-muted)' }}
                   >
                     Cancel
                   </button>
@@ -941,18 +977,30 @@ export default function RepositoriesPage() {
 
             {/* Deactivate confirmation */}
             {confirmDeleteId === repo.id && (
-              <div className="mt-3 ml-9 flex items-center gap-3 text-xs text-gray-600 dark:text-gray-400">
-                <span>Deactivate <span className="font-medium text-gray-900 dark:text-gray-100">{repo.full_name}</span>? It will be removed from all platform processes.</span>
+              <div
+                className="mt-3 ml-9 flex flex-wrap items-center gap-3 hz-sm rounded-md px-3 py-2"
+                style={{
+                  border: '1px solid var(--hz-warn-bd)',
+                  background: 'var(--hz-warn-bg)',
+                  color: 'var(--hz-warn)',
+                }}
+              >
+                <span style={{ color: 'var(--hz-ink2)' }}>
+                  Deactivate <span className="font-medium" style={{ color: 'var(--hz-ink)' }}>{repo.full_name}</span>? It will be removed from all platform processes.
+                </span>
                 <button
+                  type="button"
                   onClick={() => deactivateMutation.mutate(repo.id)}
                   disabled={deactivateMutation.isPending}
-                  className="px-3 py-1.5 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-lg font-medium hover:bg-gray-700 dark:hover:bg-gray-300 disabled:opacity-50 shrink-0"
+                  className="hz-btn hz-btn-primary text-xs px-3 py-1.5 shrink-0 disabled:opacity-50"
                 >
                   {deactivateMutation.isPending ? 'Deactivating...' : 'Deactivate'}
                 </button>
                 <button
+                  type="button"
                   onClick={() => setConfirmDeleteId(null)}
-                  className="px-3 py-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 shrink-0"
+                  className="hz-btn hz-btn-ghost text-xs px-3 py-1.5 shrink-0"
+                  style={{ color: 'var(--hz-muted)' }}
                 >
                   Cancel
                 </button>
@@ -966,26 +1014,23 @@ export default function RepositoriesPage() {
       {/* Analyze now modal — wide layout, scroll body, sticky actions */}
       {analyzeModal && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center sm:items-center bg-black/60 p-0 sm:p-4 md:p-6 overflow-y-auto overscroll-y-contain"
+          className="fixed inset-0 z-50 flex items-end justify-center sm:items-center p-0 sm:p-4 md:p-6 overflow-y-auto overscroll-y-contain"
+          style={hzOverlay}
           role="dialog"
           aria-modal="true"
           aria-labelledby="analyze-modal-title"
         >
-          <div className="flex flex-col w-full max-w-[min(100%,1280px)] sm:max-h-[min(92dvh,920px)] max-h-[100dvh] min-h-0 bg-white dark:bg-gray-900 shadow-2xl border border-gray-200 dark:border-gray-700 rounded-t-2xl sm:rounded-xl my-0 sm:my-0">
-            <div className="shrink-0 flex items-center justify-between gap-4 px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div
+            className="flex flex-col w-full max-w-[min(100%,1280px)] sm:max-h-[min(92dvh,920px)] max-h-[100dvh] min-h-0 rounded-t-2xl sm:rounded-lg my-0 sm:my-0"
+            style={hzModalPanel}
+          >
+            <div className="shrink-0 flex items-center justify-between gap-4 px-4 sm:px-6 py-4" style={hzModalHeaderBar}>
               <div className="min-w-0">
-                <h2
-                  id="analyze-modal-title"
-                  className="text-base font-semibold text-gray-900 dark:text-gray-100"
-                >
+                <h2 id="analyze-modal-title" className="hz-h2" style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: 'var(--hz-ink)' }}>
                   Analyze repository
                 </h2>
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate">
-                  <RepoWebLink
-                    name={analyzeModal.repo.full_name}
-                    href={analyzeModal.repo.web_url}
-                    className="text-gray-400 dark:text-gray-500 hover:text-blue-500 dark:hover:text-blue-400"
-                  />
+                <p className="hz-sm mt-1 truncate" style={{ color: 'var(--hz-muted)' }}>
+                  <RepoWebLink name={analyzeModal.repo.full_name} href={analyzeModal.repo.web_url} />
                 </p>
               </div>
               <button
@@ -996,7 +1041,8 @@ export default function RepositoriesPage() {
                   setSelectAll(true)
                   setEstimate(null)
                 }}
-                className="shrink-0 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-2xl leading-none w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                className="hz-btn hz-btn-ghost shrink-0 text-2xl leading-none w-10 h-10 p-0 flex items-center justify-center rounded-md"
+                style={{ color: 'var(--hz-muted)' }}
                 aria-label="Close"
               >
                 ×
@@ -1009,28 +1055,27 @@ export default function RepositoriesPage() {
                 {/* Left column — scope selector */}
                 <div className="lg:col-span-7 space-y-5 min-w-0">
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-3">
-                      Scope
-                    </label>
+                    <label className="hz-label mb-3">Scope</label>
 
                     {/* Select-all toggle */}
                     <button
                       type="button"
                       onClick={() => { setSelectAll(true); setQuickScope([]) }}
-                      className={`w-full flex items-start gap-3 px-4 py-3 rounded-lg border text-left text-xs transition-colors mb-2 ${
-                        selectAll
-                          ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 ring-1 ring-gray-900/10 dark:ring-white/10'
-                          : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
-                      }`}
+                      className="w-full flex items-start gap-3 px-4 py-3 rounded-md text-left text-xs transition-none mb-2"
+                      style={hzCardChoice(selectAll)}
                     >
-                      <span className={`mt-0.5 w-3.5 h-3.5 rounded-full border-2 shrink-0 flex items-center justify-center ${
-                        selectAll ? 'border-gray-900 dark:border-gray-100 bg-gray-900 dark:bg-gray-100' : 'border-gray-300 dark:border-gray-600'
-                      }`}>
-                        {selectAll && <span className="w-1.5 h-1.5 rounded-full bg-white dark:bg-gray-900" />}
+                      <span
+                        className="mt-0.5 w-3.5 h-3.5 rounded-full border-2 shrink-0 flex items-center justify-center"
+                        style={{
+                          borderColor: selectAll ? 'var(--hz-ink)' : 'var(--hz-rule2)',
+                          background: selectAll ? 'var(--hz-ink)' : 'transparent',
+                        }}
+                      >
+                        {selectAll && <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--hz-bg)' }} />}
                       </span>
                       <div>
-                        <div className="font-medium">Analyze all files</div>
-                        <div className="text-gray-400 dark:text-gray-500 mt-0.5 leading-snug">
+                        <div className="font-medium" style={{ color: 'var(--hz-ink)' }}>Analyze all files</div>
+                        <div className="hz-sm mt-0.5 leading-snug" style={{ color: 'var(--hz-muted)' }}>
                           Full repo scan — type is chosen automatically based on existing context.
                         </div>
                       </div>
@@ -1040,20 +1085,21 @@ export default function RepositoriesPage() {
                     <button
                       type="button"
                       onClick={() => setSelectAll(false)}
-                      className={`w-full flex items-start gap-3 px-4 py-3 rounded-lg border text-left text-xs transition-colors ${
-                        !selectAll
-                          ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 ring-1 ring-gray-900/10 dark:ring-white/10'
-                          : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
-                      }`}
+                      className="w-full flex items-start gap-3 px-4 py-3 rounded-md text-left text-xs transition-none"
+                      style={hzCardChoice(!selectAll)}
                     >
-                      <span className={`mt-0.5 w-3.5 h-3.5 rounded-full border-2 shrink-0 flex items-center justify-center ${
-                        !selectAll ? 'border-gray-900 dark:border-gray-100 bg-gray-900 dark:bg-gray-100' : 'border-gray-300 dark:border-gray-600'
-                      }`}>
-                        {!selectAll && <span className="w-1.5 h-1.5 rounded-full bg-white dark:bg-gray-900" />}
+                      <span
+                        className="mt-0.5 w-3.5 h-3.5 rounded-full border-2 shrink-0 flex items-center justify-center"
+                        style={{
+                          borderColor: !selectAll ? 'var(--hz-ink)' : 'var(--hz-rule2)',
+                          background: !selectAll ? 'var(--hz-ink)' : 'transparent',
+                        }}
+                      >
+                        {!selectAll && <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--hz-bg)' }} />}
                       </span>
                       <div>
-                        <div className="font-medium">Select files or folders</div>
-                        <div className="text-gray-400 dark:text-gray-500 mt-0.5 leading-snug">
+                        <div className="font-medium" style={{ color: 'var(--hz-ink)' }}>Select files or folders</div>
+                        <div className="hz-sm mt-0.5 leading-snug" style={{ color: 'var(--hz-muted)' }}>
                           Targeted pass on selected paths only — faster and cheaper.
                         </div>
                       </div>
@@ -1062,8 +1108,9 @@ export default function RepositoriesPage() {
 
                   {!selectAll && (
                     <div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 leading-relaxed">
-                        Browse and pick one or more <strong>files</strong> or <strong>folders</strong>. Folders are expanded server-side.
+                      <p className="hz-sm mb-2 leading-relaxed" style={{ color: 'var(--hz-ink2)' }}>
+                        Browse and pick one or more <strong style={{ color: 'var(--hz-ink)' }}>files</strong> or{' '}
+                        <strong style={{ color: 'var(--hz-ink)' }}>folders</strong>. Folders are expanded server-side.
                       </p>
                       <RepoContentsPicker
                         repoId={analyzeModal.repo.id}
@@ -1073,7 +1120,14 @@ export default function RepositoriesPage() {
                         listMaxHeightClassName="max-h-[min(38vh,14rem)] sm:max-h-80 lg:max-h-[min(52vh,26rem)] xl:max-h-[28rem]"
                       />
                       {quickScope.length === 0 && (
-                        <p className="text-xs text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 rounded-lg px-3 py-2 mt-2">
+                        <p
+                          className="hz-sm rounded-md px-3 py-2 mt-2"
+                          style={{
+                            border: '1px solid var(--hz-warn-bd)',
+                            background: 'var(--hz-warn-bg)',
+                            color: 'var(--hz-warn)',
+                          }}
+                        >
                           Select at least one file or folder to continue.
                         </p>
                       )}
@@ -1082,13 +1136,13 @@ export default function RepositoriesPage() {
                 </div>
 
                 {/* Right column: LLM + branch */}
-                <div className="lg:col-span-5 space-y-5 min-w-0 lg:border-l lg:border-gray-200 dark:lg:border-gray-700 lg:pl-6 xl:pl-8">
+                <div className="lg:col-span-5 space-y-5 min-w-0 lg:border-l lg:border-[var(--hz-rule)] lg:pl-6 xl:pl-8">
                   <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3">
+                    <p className="hz-label mb-3" style={{ letterSpacing: '0.12em' }}>
                       Run configuration
                     </p>
 
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">
+                    <label className="hz-label mb-2">
                       LLM Model
                     </label>
                     <div className="grid grid-cols-2 gap-2 mb-4">
@@ -1100,25 +1154,23 @@ export default function RepositoriesPage() {
                           key={opt.value}
                           type="button"
                           onClick={() => setSelectedProvider(opt.value)}
-                          className={`flex flex-col text-left px-3 py-2.5 rounded-lg border text-xs transition-colors ${
-                            selectedProvider === opt.value
-                              ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 ring-1 ring-gray-900/10 dark:ring-white/10'
-                              : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
-                          }`}
+                          className="flex flex-col text-left px-3 py-2.5 rounded-md border text-xs transition-none"
+                          style={hzCardChoice(selectedProvider === opt.value)}
                         >
-                          <span className="font-medium">{opt.label}</span>
-                          <span className="text-gray-400 dark:text-gray-500 mt-0.5 leading-snug">{opt.desc}</span>
+                          <span className="font-medium" style={{ color: 'var(--hz-ink)' }}>{opt.label}</span>
+                          <span className="hz-sm mt-0.5 leading-snug" style={{ color: 'var(--hz-muted)' }}>{opt.desc}</span>
                         </button>
                       ))}
                     </div>
 
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">
+                    <label className="hz-label mb-2">
                       Branch / Tag
                     </label>
                     <select
                       value={analyzeBranch}
                       onChange={(e) => setAnalyzeBranch(e.target.value)}
-                      className="w-full px-3 py-2.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400/30 dark:focus:ring-gray-500/30"
+                      className="hz-inp w-full px-3 py-2.5 text-sm"
+                      style={{ color: 'var(--hz-ink)', borderRadius: 'var(--hz-md)' }}
                     >
                       {!repoRefs ? (
                         <option value={analyzeModal.repo.default_branch}>{analyzeModal.repo.default_branch}</option>
@@ -1149,19 +1201,22 @@ export default function RepositoriesPage() {
 
                   {/* Estimate info */}
                   {(estimate || estimating) && (
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3 text-xs space-y-1.5">
-                      <p className="font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide text-[10px]">Estimate</p>
+                    <div
+                      className="rounded-md px-4 py-3 hz-sm space-y-1.5"
+                      style={{ border: '1px solid var(--hz-rule)', background: 'var(--hz-bg2)' }}
+                    >
+                      <p className="hz-label" style={{ fontSize: '10px' }}>Estimate</p>
                       {estimating ? (
-                        <p className="text-gray-400 dark:text-gray-500 italic">Calculating…</p>
+                        <p style={{ color: 'var(--hz-muted)', fontStyle: 'italic' }}>Calculating…</p>
                       ) : estimate ? (
                         <>
-                          <p className="text-gray-700 dark:text-gray-300">
-                            <span className="font-medium capitalize">{estimate.analysis_type}</span> analysis
+                          <p style={{ color: 'var(--hz-ink2)' }}>
+                            <span className="font-medium capitalize" style={{ color: 'var(--hz-ink)' }}>{estimate.analysis_type}</span> analysis
                             {estimate.file_count > 0 && (
-                              <span className="text-gray-400 dark:text-gray-500"> · {estimate.file_count} path{estimate.file_count !== 1 ? 's' : ''} selected</span>
+                              <span style={{ color: 'var(--hz-muted)' }}> · {estimate.file_count} path{estimate.file_count !== 1 ? 's' : ''} selected</span>
                             )}
                           </p>
-                          <p className="text-gray-500 dark:text-gray-400">
+                          <p style={{ color: 'var(--hz-muted)' }}>
                             ~{estimate.estimated_credits} credit{estimate.estimated_credits !== 1 ? 's' : ''}
                           </p>
                         </>
@@ -1172,7 +1227,7 @@ export default function RepositoriesPage() {
               </div>
             </div>
 
-            <div className="shrink-0 flex flex-col-reverse sm:flex-row gap-2 sm:gap-3 px-4 sm:px-6 py-4 border-t border-gray-200 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/50">
+            <div className="shrink-0 flex flex-col-reverse sm:flex-row gap-2 sm:gap-3 px-4 sm:px-6 py-4" style={hzModalFooterBar}>
               <button
                 type="button"
                 onClick={() => {
@@ -1181,7 +1236,7 @@ export default function RepositoriesPage() {
                   setSelectAll(true)
                   setEstimate(null)
                 }}
-                className="w-full sm:flex-1 py-2.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-800"
+                className="hz-btn hz-btn-outline w-full sm:flex-1 py-2.5 text-sm"
               >
                 Cancel
               </button>
@@ -1189,7 +1244,7 @@ export default function RepositoriesPage() {
                 type="button"
                 onClick={submitAnalyze}
                 disabled={triggerMutation.isPending || (!selectAll && quickScope.length === 0)}
-                className="w-full sm:flex-1 py-2.5 text-sm bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-lg font-medium hover:bg-gray-700 dark:hover:bg-gray-300 disabled:opacity-50"
+                className="hz-btn hz-btn-primary w-full sm:flex-1 py-2.5 text-sm disabled:opacity-50"
               >
                 {triggerMutation.isPending ? 'Starting...' : 'Start analysis'}
               </button>
@@ -1200,37 +1255,53 @@ export default function RepositoriesPage() {
 
       {/* Add repo modal */}
       {showAdd && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-xl w-full max-w-lg shadow-xl border border-gray-200 dark:border-gray-700 flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={hzOverlay}>
+          <div className="flex flex-col w-full max-w-lg max-h-[90vh]" style={hzModalPanel}>
 
             {/* Header — always visible */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 shrink-0">
-              <div className="flex items-center gap-3">
-                <span className={`w-6 h-6 rounded-full text-xs flex items-center justify-center font-medium ${step === 'select' ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}`}>1</span>
-                <span className={`text-sm ${step === 'select' ? 'font-medium text-gray-900 dark:text-gray-100' : 'text-gray-400'}`}>Select repo</span>
-                <span className="text-gray-300 dark:text-gray-600">→</span>
-                <span className={`w-6 h-6 rounded-full text-xs flex items-center justify-center font-medium ${step === 'context' ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}`}>2</span>
-                <span className={`text-sm ${step === 'context' ? 'font-medium text-gray-900 dark:text-gray-100' : 'text-gray-400'}`}>Configure</span>
+            <div className="flex items-center justify-between px-6 py-4 shrink-0" style={hzModalHeaderBar}>
+              <div className="flex items-center gap-3 flex-wrap">
+                <span
+                  className="w-6 h-6 rounded-full text-xs flex items-center justify-center font-medium"
+                  style={hzStepDot(step === 'select')}
+                >
+                  1
+                </span>
+                <span className="text-sm" style={{ fontWeight: step === 'select' ? 500 : 400, color: step === 'select' ? 'var(--hz-ink)' : 'var(--hz-muted)' }}>
+                  Select repo
+                </span>
+                <span style={{ color: 'var(--hz-rule2)' }}>→</span>
+                <span
+                  className="w-6 h-6 rounded-full text-xs flex items-center justify-center font-medium"
+                  style={hzStepDot(step === 'context')}
+                >
+                  2
+                </span>
+                <span className="text-sm" style={{ fontWeight: step === 'context' ? 500 : 400, color: step === 'context' ? 'var(--hz-ink)' : 'var(--hz-muted)' }}>
+                  Configure
+                </span>
               </div>
-              <button onClick={closeAdd} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-lg leading-none">×</button>
+              <button type="button" onClick={closeAdd} className="hz-btn hz-btn-ghost text-lg leading-none p-1" style={{ color: 'var(--hz-muted)' }} aria-label="Close">
+                ×
+              </button>
             </div>
 
             {/* Step 1 — select repo */}
             {step === 'select' && (
               <div className="flex flex-col flex-1 min-h-0">
                 <div className="px-6 pt-5 pb-3 shrink-0">
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <p className="hz-body text-sm" style={{ color: 'var(--hz-ink2)', margin: 0 }}>
                     {showAddScmPicker
                       ? 'You have more than one SCM connected. Choose which provider to import from.'
                       : 'Choose a repository from a connected provider (GitHub, GitLab, or Bitbucket).'}
                   </p>
                 </div>
                 {scmConnectionsLoading ? (
-                  <div className="text-sm text-gray-400 dark:text-gray-500 text-center py-8 px-6">
+                  <div className="hz-sm text-center py-8 px-6" style={{ color: 'var(--hz-muted)' }}>
                     Loading connections…
                   </div>
                 ) : connectedScmTypes.length === 0 ? (
-                  <div className="text-sm text-gray-400 dark:text-gray-500 text-center py-6 px-6">
+                  <div className="hz-sm text-center py-6 px-6" style={{ color: 'var(--hz-muted)' }}>
                     No SCM connected. Connect GitHub, GitLab, or Bitbucket in Settings → Connections first.
                   </div>
                 ) : showAddScmPicker ? (
@@ -1244,7 +1315,8 @@ export default function RepositoriesPage() {
                             setAddRepoScmChoice(id)
                             setAddRepoSearch('')
                           }}
-                          className="flex items-center gap-3 w-full text-left p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 transition-colors"
+                          className="flex items-center gap-3 w-full text-left p-3 rounded-md text-sm transition-none hz-btn hz-btn-outline"
+                          style={{ borderRadius: 'var(--hz-md)', color: 'var(--hz-ink)' }}
                         >
                           <ScmLogo scm={id} className="h-6 w-6 shrink-0" />
                           <span className="font-medium">{SCM_CHOICE_LABEL[id]}</span>
@@ -1253,7 +1325,7 @@ export default function RepositoriesPage() {
                     </div>
                   </div>
                 ) : availableLoading ? (
-                  <div className="text-sm text-gray-400 dark:text-gray-500 text-center py-8 px-6">
+                  <div className="hz-sm text-center py-8 px-6" style={{ color: 'var(--hz-muted)' }}>
                     Loading repositories…
                   </div>
                 ) : (
@@ -1261,7 +1333,7 @@ export default function RepositoriesPage() {
                     <div className="px-6 pb-3 shrink-0 space-y-2">
                       {connectedScmTypes.length > 1 && effectiveAddScm && (
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                          <span className="hz-sm flex items-center gap-2" style={{ color: 'var(--hz-muted)' }}>
                             <ScmLogo scm={effectiveAddScm} className="h-4 w-4 shrink-0" />
                             {SCM_CHOICE_LABEL[effectiveAddScm]}
                           </span>
@@ -1271,30 +1343,32 @@ export default function RepositoriesPage() {
                               setAddRepoScmChoice(null)
                               setAddRepoSearch('')
                             }}
-                            className="text-xs text-blue-600 dark:text-blue-400 hover:underline shrink-0"
+                            className="hz-sm shrink-0"
+                            style={{ color: 'var(--hz-info)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: '2px' }}
                           >
                             Change provider
                           </button>
                         </div>
                       )}
                       <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 pointer-events-none" style={{ color: 'var(--hz-muted)' }} />
                         <input
                           type="search"
                           value={addRepoSearch}
                           onChange={(e) => setAddRepoSearch(e.target.value)}
                           placeholder="Search by repository name…"
-                          className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400 dark:focus:ring-gray-500"
+                          className="hz-inp w-full pl-9 pr-3 py-2 text-sm"
+                          style={{ borderRadius: 'var(--hz-md)', color: 'var(--hz-ink)' }}
                           autoComplete="off"
                         />
                       </div>
                     </div>
                     {reposForSelectedScm.length === 0 ? (
-                      <div className="text-sm text-gray-400 dark:text-gray-500 text-center py-6 px-6">
+                      <div className="hz-sm text-center py-6 px-6" style={{ color: 'var(--hz-muted)' }}>
                         No repositories available for this account.
                       </div>
                     ) : filteredAvailableRepos.length === 0 ? (
-                      <div className="text-sm text-gray-400 dark:text-gray-500 text-center py-6 px-6">
+                      <div className="hz-sm text-center py-6 px-6" style={{ color: 'var(--hz-muted)' }}>
                         No repositories match your search.
                       </div>
                     ) : (
@@ -1321,7 +1395,20 @@ export default function RepositoriesPage() {
                                   handleSelectRepo(r)
                                 }
                               }}
-                              className="w-full text-left p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 transition-colors flex items-center justify-between gap-2"
+                              className="w-full text-left p-3 rounded-md text-sm transition-none flex items-center justify-between gap-2"
+                              style={{
+                                border: '1px solid var(--hz-rule)',
+                                background: 'var(--hz-bg)',
+                                color: 'var(--hz-ink)',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.borderColor = 'var(--hz-rule2)'
+                                e.currentTarget.style.background = 'var(--hz-bg2)'
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.borderColor = 'var(--hz-rule)'
+                                e.currentTarget.style.background = 'var(--hz-bg)'
+                              }}
                             >
                               <ScmLogo scm={st} className="h-5 w-5 shrink-0 opacity-80" />
                               <span className="min-w-0 flex-1">
@@ -1329,12 +1416,13 @@ export default function RepositoriesPage() {
                                   href={browseUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="font-medium hover:underline hover:text-blue-600 dark:hover:text-blue-400"
+                                  className="font-medium hover:underline"
+                                  style={{ color: 'var(--hz-ink)' }}
                                   onClick={(e) => e.stopPropagation()}
                                 >
                                   {r.full_name}
                                 </a>
-                                <span className="text-xs text-gray-400 dark:text-gray-500 ml-2">{r.default_branch}</span>
+                                <span className="hz-sm ml-2" style={{ color: 'var(--hz-muted)' }}>{r.default_branch}</span>
                               </span>
                             </div>
                           )
@@ -1344,8 +1432,8 @@ export default function RepositoriesPage() {
                   </>
                 )}
                 {/* Footer — always visible */}
-                <div className="px-6 pb-5 pt-3 shrink-0">
-                  <button onClick={closeAdd} className="w-full py-2 text-sm text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+                <div className="px-6 pb-5 pt-3 shrink-0" style={hzModalFooterBar}>
+                  <button type="button" onClick={closeAdd} className="hz-btn hz-btn-ghost w-full py-2 text-sm" style={{ color: 'var(--hz-muted)' }}>
                     Cancel
                   </button>
                 </div>
@@ -1375,27 +1463,24 @@ export default function RepositoriesPage() {
                     />
                   </div>
 
-                  <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+                  <p className="hz-sm leading-relaxed" style={{ color: 'var(--hz-ink2)', margin: 0 }}>
                     This context helps Horion tailor its analysis. All fields are optional — you can update them later.
                   </p>
 
                   {/* Repo type */}
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">Repository type</label>
+                    <label className="hz-label mb-2">Repository type</label>
                     <div className="grid grid-cols-2 gap-2">
                       {REPO_TYPES.map((t) => (
                         <button
                           key={t.value}
                           type="button"
                           onClick={() => setContext((c) => ({ ...c, repo_type: c.repo_type === t.value ? '' : t.value, app_subtype: '', iac_provider: '' }))}
-                          className={`text-left p-3 rounded-lg border text-xs transition-colors ${
-                            context.repo_type === t.value
-                              ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-                              : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
-                          }`}
+                          className="text-left p-3 rounded-md border text-xs transition-none"
+                          style={{ ...hzCardChoice(context.repo_type === t.value), borderRadius: 'var(--hz-md)' }}
                         >
-                          <div className="font-medium mb-0.5">{t.label}</div>
-                          <div className="text-gray-400 dark:text-gray-500">{t.description}</div>
+                          <div className="font-medium mb-0.5" style={{ color: 'var(--hz-ink)' }}>{t.label}</div>
+                          <div className="hz-micro" style={{ color: 'var(--hz-muted)' }}>{t.description}</div>
                         </button>
                       ))}
                     </div>
@@ -1404,18 +1489,15 @@ export default function RepositoriesPage() {
                   {/* App subtype */}
                   {context.repo_type === 'app' && (
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">Application type</label>
+                      <label className="hz-label mb-2">Application type</label>
                       <div className="flex flex-wrap gap-2">
                         {APP_SUBTYPES.map((s) => (
                           <button
                             key={s.value}
                             type="button"
                             onClick={() => setContext((c) => ({ ...c, app_subtype: c.app_subtype === s.value ? '' : s.value }))}
-                            className={`px-3 py-1 rounded text-xs border transition-colors ${
-                              context.app_subtype === s.value
-                                ? 'border-gray-900 dark:border-gray-100 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-medium'
-                                : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400'
-                            }`}
+                            className="px-3 py-1 rounded-md text-xs font-medium transition-none"
+                            style={{ ...hzChip(context.app_subtype === s.value), borderRadius: 'var(--hz-md)' }}
                           >{s.label}</button>
                         ))}
                       </div>
@@ -1425,18 +1507,15 @@ export default function RepositoriesPage() {
                   {/* IaC provider */}
                   {context.repo_type === 'iac' && (
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">Cloud provider</label>
+                      <label className="hz-label mb-2">Cloud provider</label>
                       <div className="flex flex-wrap gap-2">
                         {IAC_PROVIDERS.map((p) => (
                           <button
                             key={p.value}
                             type="button"
                             onClick={() => setContext((c) => ({ ...c, iac_provider: c.iac_provider === p.value ? '' : p.value }))}
-                            className={`px-3 py-1 rounded text-xs border transition-colors ${
-                              context.iac_provider === p.value
-                                ? 'border-gray-900 dark:border-gray-100 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-medium'
-                                : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400'
-                            }`}
+                            className="px-3 py-1 rounded-md text-xs font-medium transition-none"
+                            style={{ ...hzChip(context.iac_provider === p.value), borderRadius: 'var(--hz-md)' }}
                           >{p.label}</button>
                         ))}
                       </div>
@@ -1445,7 +1524,7 @@ export default function RepositoriesPage() {
 
                   {/* Language */}
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">Primary language</label>
+                    <label className="hz-label mb-2">Primary language</label>
                     <div className="flex flex-wrap gap-2">
                       {LANGUAGES.map((lang) => (
                         <button
@@ -1457,11 +1536,8 @@ export default function RepositoriesPage() {
                               ? c.languages.filter((l) => l !== lang)
                               : [...c.languages, lang],
                           }))}
-                          className={`px-3 py-1 rounded text-xs border transition-colors ${
-                            context.languages.includes(lang)
-                              ? 'border-gray-900 dark:border-gray-100 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-medium'
-                              : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
-                          }`}
+                          className="px-3 py-1 rounded-md text-xs font-medium transition-none"
+                          style={{ ...hzChip(context.languages.includes(lang)), borderRadius: 'var(--hz-md)' }}
                         >
                           {lang}
                         </button>
@@ -1471,19 +1547,16 @@ export default function RepositoriesPage() {
 
                   {/* Observability backend */}
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">Observability backend</label>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mb-2">Where your metrics/traces are sent.</p>
+                    <label className="hz-label mb-2">Observability backend</label>
+                    <p className="hz-sm mb-2" style={{ color: 'var(--hz-muted)' }}>Where your metrics/traces are sent.</p>
                     <div className="flex flex-wrap gap-2">
                       {OBS_BACKENDS.map((b) => (
                         <button
                           key={b.value}
                           type="button"
                           onClick={() => setContext((c) => ({ ...c, observability_backend: c.observability_backend === b.value ? '' : b.value, obs_kv: [] }))}
-                          className={`px-3 py-1 rounded text-xs border transition-colors ${
-                            context.observability_backend === b.value
-                              ? 'border-gray-900 dark:border-gray-100 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-medium'
-                              : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
-                          }`}
+                          className="px-3 py-1 rounded-md text-xs font-medium transition-none"
+                          style={{ ...hzChip(context.observability_backend === b.value), borderRadius: 'var(--hz-md)' }}
                         >
                           {b.label}
                         </button>
@@ -1493,21 +1566,18 @@ export default function RepositoriesPage() {
 
                   {/* Instrumentation */}
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">Instrumentation library</label>
-                    <div className="grid grid-cols-3 gap-2">
+                    <label className="hz-label mb-2">Instrumentation library</label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {INSTRUMENTATIONS.map((inst) => (
                         <button
                           key={inst.value}
                           type="button"
                           onClick={() => setContext((c) => ({ ...c, instrumentation: c.instrumentation === inst.value ? '' : inst.value }))}
-                          className={`text-left p-2.5 rounded-lg border text-xs transition-colors ${
-                            context.instrumentation === inst.value
-                              ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-                              : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
-                          }`}
+                          className="text-left p-2.5 rounded-md border text-xs transition-none"
+                          style={{ ...hzCardChoice(context.instrumentation === inst.value), borderRadius: 'var(--hz-md)' }}
                         >
-                          <div className="font-medium">{inst.label}</div>
-                          <div className="text-gray-400 dark:text-gray-500 text-[10px] mt-0.5">{inst.description}</div>
+                          <div className="font-medium" style={{ color: 'var(--hz-ink)' }}>{inst.label}</div>
+                          <div className="hz-micro mt-0.5" style={{ color: 'var(--hz-muted)' }}>{inst.description}</div>
                         </button>
                       ))}
                     </div>
@@ -1515,32 +1585,34 @@ export default function RepositoriesPage() {
 
                   {/* Observability metadata */}
                   {context.observability_backend && (
-                    <div className="pl-3 border-l-2 border-gray-200 dark:border-gray-700 space-y-3">
+                    <div className="space-y-3 pl-3" style={{ borderLeft: '2px solid var(--hz-rule)' }}>
                       <div className="flex gap-3">
                         <div className="flex-1">
-                          <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Service name</label>
+                          <label className="hz-label mb-1" style={{ display: 'block' }}>Service name</label>
                           <input
                             type="text"
                             value={context.service_name}
                             onChange={(e) => setContext((c) => ({ ...c, service_name: e.target.value }))}
                             placeholder="e.g. checkout-api"
-                            className="w-full px-2.5 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:border-gray-400"
+                            className="hz-inp w-full px-2.5 py-1.5 text-xs"
+                            style={{ borderRadius: 'var(--hz-md)' }}
                           />
                         </div>
                         <div className="flex-1">
-                          <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Environment</label>
+                          <label className="hz-label mb-1" style={{ display: 'block' }}>Environment</label>
                           <input
                             type="text"
                             value={context.environment}
                             onChange={(e) => setContext((c) => ({ ...c, environment: e.target.value }))}
                             placeholder="e.g. production"
-                            className="w-full px-2.5 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:border-gray-400"
+                            className="hz-inp w-full px-2.5 py-1.5 text-xs"
+                            style={{ borderRadius: 'var(--hz-md)' }}
                           />
                         </div>
                       </div>
                       {(context.observability_backend === 'datadog' || context.observability_backend === 'prometheus' || context.observability_backend === 'grafana') && (
                         <div>
-                          <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                          <label className="hz-sm mb-1 block" style={{ color: 'var(--hz-ink2)' }}>
                             {context.observability_backend === 'datadog' ? 'Datadog tags' : 'Prometheus / Grafana labels'}
                           </label>
                           <div className="space-y-1.5">
@@ -1553,9 +1625,10 @@ export default function RepositoriesPage() {
                                     const kv = [...c.obs_kv]; kv[i] = { ...kv[i], key: e.target.value }; return { ...c, obs_kv: kv }
                                   })}
                                   placeholder="key"
-                                  className="w-24 px-2 py-1 text-xs border border-gray-200 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none"
+                                  className="hz-inp w-24 px-2 py-1 text-xs"
+                                  style={{ borderRadius: 'var(--hz-sm)' }}
                                 />
-                                <span className="text-gray-400 text-xs">:</span>
+                                <span className="hz-sm" style={{ color: 'var(--hz-muted)' }}>:</span>
                                 <input
                                   type="text"
                                   value={pair.value}
@@ -1563,15 +1636,22 @@ export default function RepositoriesPage() {
                                     const kv = [...c.obs_kv]; kv[i] = { ...kv[i], value: e.target.value }; return { ...c, obs_kv: kv }
                                   })}
                                   placeholder="value"
-                                  className="flex-1 px-2 py-1 text-xs border border-gray-200 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none"
+                                  className="hz-inp flex-1 px-2 py-1 text-xs"
+                                  style={{ borderRadius: 'var(--hz-sm)' }}
                                 />
-                                <button type="button" onClick={() => setContext((c) => ({ ...c, obs_kv: c.obs_kv.filter((_, j) => j !== i) }))} className="text-gray-400 hover:text-red-500 text-xs px-1">✕</button>
+                                <button
+                                  type="button"
+                                  onClick={() => setContext((c) => ({ ...c, obs_kv: c.obs_kv.filter((_, j) => j !== i) }))}
+                                  className="hz-sm px-1"
+                                  style={{ color: 'var(--hz-muted)', background: 'transparent', border: 'none', cursor: 'pointer' }}
+                                >✕</button>
                               </div>
                             ))}
                             <button
                               type="button"
                               onClick={() => setContext((c) => ({ ...c, obs_kv: [...c.obs_kv, { key: '', value: '' }] }))}
-                              className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                              className="hz-sm"
+                              style={{ color: 'var(--hz-info)', background: 'transparent', border: 'none', cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: '2px' }}
                             >+ Add pair</button>
                           </div>
                         </div>
@@ -1581,18 +1661,20 @@ export default function RepositoriesPage() {
                 </div>
 
                 {/* Footer — always visible, pinned below scroll area */}
-                <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 shrink-0">
+                <div className="px-6 py-4 shrink-0" style={hzModalFooterBar}>
                   <div className="flex gap-3">
                     <button
+                      type="button"
                       onClick={() => setStep('select')}
-                      className="flex-1 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                      className="hz-btn hz-btn-outline flex-1 py-2 text-sm"
                     >
                       Back
                     </button>
                     <button
+                      type="button"
                       onClick={handleFinish}
                       disabled={activateMutation.isPending}
-                      className="flex-1 py-2 text-sm bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-lg font-medium hover:bg-gray-700 dark:hover:bg-gray-300 disabled:opacity-50"
+                      className="hz-btn hz-btn-primary flex-1 py-2 text-sm disabled:opacity-50"
                     >
                       {activateMutation.isPending ? 'Adding...' : 'Add repository'}
                     </button>

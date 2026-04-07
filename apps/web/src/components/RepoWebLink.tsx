@@ -18,7 +18,14 @@ export function RepoWebLink({
       target="_blank"
       rel="noopener noreferrer"
       title={`Open ${name} on Git host`}
-      className={`hover:underline text-inherit hover:text-blue-600 dark:hover:text-blue-400 ${className}`}
+      className={`hover:underline ${className}`}
+      style={{ color: 'inherit' }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.color = 'var(--hz-info)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.color = 'inherit'
+      }}
       onClick={(e) => e.stopPropagation()}
     >
       {name}

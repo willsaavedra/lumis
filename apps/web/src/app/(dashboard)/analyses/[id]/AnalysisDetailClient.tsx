@@ -3,6 +3,7 @@
 import axios from 'axios'
 import Link from 'next/link'
 import { useState, useMemo, useRef, type CSSProperties } from 'react'
+import { useParams } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { analysesApi, reposApi, type AnalysisResultPayload, type CrossrunSummary } from '@/lib/api'
 import { useAnalysisProgress } from '@/hooks/useAnalysisProgress'
@@ -73,8 +74,9 @@ function scoreJustification(
   return parts.join(' · ') + ` finding${n.total !== 1 ? 's' : ''}`
 }
 
-export default function AnalysisDetailPage({ params }: { params: { id: string } }) {
-  const { id } = params
+export default function AnalysisDetailPage() {
+  const params = useParams()
+  const id = params.id as string
   const qc = useQueryClient()
   const streamHealthyRef = useRef(false)
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all')

@@ -48,13 +48,40 @@ export function RepoContentsPicker({
 
   const crumbs = browsePath ? browsePath.split('/') : []
 
+  const crumbBtn = {
+    base: {
+      color: 'var(--hz-ink2)',
+      background: 'transparent',
+      border: 'none',
+      cursor: 'pointer' as const,
+      padding: 0,
+    },
+  }
+
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 overflow-hidden">
-      <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 flex-wrap">
+    <div
+      className="rounded-md overflow-hidden"
+      style={{
+        border: '1px solid var(--hz-rule)',
+        background: 'var(--hz-bg2)',
+        borderRadius: 'var(--hz-md)',
+      }}
+    >
+      <div
+        className="px-3 py-2 flex items-center gap-1 text-xs flex-wrap hz-sm"
+        style={{ borderBottom: '1px solid var(--hz-rule)' }}
+      >
         <button
           type="button"
           onClick={() => setBrowsePath('')}
-          className="hover:text-gray-900 dark:hover:text-gray-200 font-medium"
+          className="font-medium"
+          style={crumbBtn.base}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = 'var(--hz-ink)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = 'var(--hz-ink2)'
+          }}
         >
           root
         </button>
@@ -62,11 +89,18 @@ export function RepoContentsPicker({
           const prefix = crumbs.slice(0, i + 1).join('/')
           return (
             <span key={prefix} className="inline-flex items-center gap-1">
-              <ChevronRight className="h-3 w-3 shrink-0 opacity-50" />
+              <ChevronRight className="h-3 w-3 shrink-0 opacity-50" style={{ color: 'var(--hz-muted)' }} />
               <button
                 type="button"
                 onClick={() => setBrowsePath(prefix)}
-                className="hover:text-gray-900 dark:hover:text-gray-200 truncate max-w-[120px]"
+                className="truncate max-w-[120px]"
+                style={crumbBtn.base}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = 'var(--hz-ink)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = 'var(--hz-ink2)'
+                }}
               >
                 {part}
               </button>
@@ -80,22 +114,35 @@ export function RepoContentsPicker({
           <button
             type="button"
             onClick={() => setBrowsePath(parentPath(browsePath))}
-            className="w-full text-left px-2 py-1.5 rounded text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+            className="w-full text-left px-2 py-1.5 rounded text-xs flex items-center gap-2"
+            style={{
+              color: 'var(--hz-ink2)',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              borderRadius: 'var(--hz-sm)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--hz-bg3)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent'
+            }}
           >
-            <span className="text-gray-400">..</span>
+            <span style={{ color: 'var(--hz-muted)' }}>..</span>
             <span>Parent folder</span>
           </button>
         ) : null}
 
         {isLoading && (
-          <div className="flex items-center justify-center gap-2 py-6 text-xs text-gray-500">
-            <Loader2 className="h-4 w-4 animate-spin" />
+          <div className="flex items-center justify-center gap-2 py-6 text-xs hz-sm">
+            <Loader2 className="h-4 w-4 animate-spin shrink-0" style={{ color: 'var(--hz-muted)' }} />
             Loading tree…
           </div>
         )}
 
         {error && (
-          <p className="text-xs text-red-600 dark:text-red-400 px-2 py-3">
+          <p className="text-xs px-2 py-3" style={{ color: 'var(--hz-crit)' }}>
             Could not load files. Check branch and GitHub connection.
           </p>
         )}
@@ -106,27 +153,45 @@ export function RepoContentsPicker({
           return (
             <div
               key={item.path}
-              className="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700/80"
+              className="flex items-center gap-2 px-2 py-1 rounded"
+              style={{ borderRadius: 'var(--hz-sm)' }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'var(--hz-bg3)'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent'
+              }}
             >
               <input
                 type="checkbox"
                 checked={checked}
                 onChange={(e) => toggle(item.path, isDir ? 'dir' : 'file', e.target.checked)}
-                className="rounded border-gray-300 dark:border-gray-600 shrink-0"
+                className="rounded shrink-0"
+                style={{
+                  accentColor: 'var(--hz-ink)',
+                  border: '1px solid var(--hz-rule2)',
+                }}
                 aria-label={isDir ? `Folder ${item.name}` : `File ${item.name}`}
               />
               {isDir ? (
                 <button
                   type="button"
                   onClick={() => setBrowsePath(item.path)}
-                  className="flex-1 min-w-0 flex items-center gap-2 text-left text-xs text-gray-900 dark:text-gray-100"
+                  className="flex-1 min-w-0 flex items-center gap-2 text-left text-xs"
+                  style={{
+                    color: 'var(--hz-ink)',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
                 >
-                  <Folder className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-500" />
+                  <Folder className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--hz-info)' }} />
                   <span className="truncate font-medium">{item.name}/</span>
                 </button>
               ) : (
-                <span className="flex-1 min-w-0 flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
-                  <FileCode className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                <span className="flex-1 min-w-0 flex items-center gap-2 text-xs" style={{ color: 'var(--hz-ink2)' }}>
+                  <FileCode className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--hz-muted)' }} />
                   <span className="truncate">{item.name}</span>
                 </span>
               )}
@@ -136,7 +201,13 @@ export function RepoContentsPicker({
       </div>
 
       {selection.length > 0 && (
-        <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700 text-[10px] text-gray-500 dark:text-gray-400">
+        <div
+          className="px-3 py-2 hz-micro"
+          style={{
+            borderTop: '1px solid var(--hz-rule)',
+            color: 'var(--hz-muted)',
+          }}
+        >
           {selection.length} path{selection.length === 1 ? '' : 's'} selected
         </div>
       )}

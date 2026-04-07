@@ -5,6 +5,10 @@
  * (trailingSlash). Works for any depth: /a/b/c/ → a/b/c/index.html,
  * /a/b/c → a/b/c/index.html.
  *
+ * Dynamic routes: Next export only emits a placeholder segment `_` (see
+ * generateStaticParams). Real IDs must map to that shell, e.g.
+ * /repositories/<uuid>/ → /repositories/_/index.html (otherwise S3 404 → home).
+ *
  * Skips real files: /_next/*, common extensions, .html, /.well-known/*.
  *
  * Associate: Viewer request · Include body: No
@@ -30,6 +34,13 @@ function handler(event) {
 
   // ACME, Universal Links, etc. — must not append index.html
   if (uri.startsWith('/.well-known/')) {
+    return request
+  }
+
+  // Static export shells live only under /repositories/_/ and /analyses/_/
+  var placeholder = mapDynamicSegmentToPlaceholderUri(uri)
+  if (placeholder !== null) {
+    request.uri = placeholder
     return request
   }
 
@@ -78,4 +89,36 @@ function segmentLooksLikeFile(segment) {
     return false
   }
   return segment.indexOf('.') !== -1
+}
+
+/**
+ * Single dynamic segment after prefix → prebuilt placeholder HTML (segment '_').
+ * Returns null when the list route or placeholder path should use default rules.
+ */
+function mapDynamicSegmentToPlaceholderUri(uri) {
+  var r = mapOneSegmentDynamic(uri, '/repositories/', '/repositories/_/index.html')
+  if (r !== null) {
+    return r
+  }
+  return mapOneSegmentDynamic(uri, '/analyses/', '/analyses/_/index.html')
+}
+
+function mapOneSegmentDynamic(uri, prefix, targetIndexHtml) {
+  if (!uri.startsWith(prefix)) {
+    return null
+  }
+  var rest = uri.substring(prefix.length)
+  if (rest.endsWith('/')) {
+    rest = rest.substring(0, rest.length - 1)
+  }
+  if (rest === '') {
+    return null
+  }
+  if (rest.indexOf('/') !== -1) {
+    return null
+  }
+  if (rest === '_') {
+    return null
+  }
+  return targetIndexHtml
 }

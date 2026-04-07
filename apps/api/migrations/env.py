@@ -11,7 +11,9 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 config = context.config
-config.set_main_option("sqlalchemy.url", os.environ.get("DATABASE_URL", ""))
+_default_db = "postgresql+asyncpg://sre:local_only@postgres:5432/horion"
+_db_url = (os.environ.get("DATABASE_URL") or "").strip() or _default_db
+config.set_main_option("sqlalchemy.url", _db_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

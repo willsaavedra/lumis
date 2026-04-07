@@ -1,16 +1,18 @@
 /** @type {import('next').NextConfig} */
-const isExport = process.env.NEXT_OUTPUT === 'export'
+
+// NEXT_OUTPUT env controls the output mode:
+//   (unset)      → Vercel default (no output key — Vercel manages the build)
+//   'standalone' → Docker image (apps/api/Dockerfile target: dev/prod)
+//   'export'     → legacy static S3/CloudFront bundle (see deploy:cf script)
+const output = process.env.NEXT_OUTPUT || undefined
 
 const nextConfig = {
-  // 'export' → static files for S3/CloudFront  |  'standalone' → Docker
-  output: isExport ? 'export' : 'standalone',
-  trailingSlash: isExport,
+  ...(output ? { output } : {}),
+  trailingSlash: output === 'export',
   images: {
-    // Required for static export; harmless in standalone
-    unoptimized: true,
-  },
-  env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+    // Disable Next.js image optimisation for static export only.
+    // Vercel and standalone Docker handle it natively.
+    unoptimized: output === 'export',
   },
 }
 

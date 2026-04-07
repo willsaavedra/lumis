@@ -4,8 +4,10 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_DATABASE_URL = "postgresql+asyncpg://sre:local_only@postgres:5432/horion"
 
 
 class AgentSettings(BaseSettings):
@@ -45,7 +47,14 @@ class AgentSettings(BaseSettings):
     s3_region: str = "us-east-1"
 
     # Database
-    database_url: str = "postgresql+asyncpg://sre:local_only@postgres:5432/lumis"
+    database_url: str = Field(default=DEFAULT_DATABASE_URL)
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _database_url_non_empty(cls, v: object) -> object:
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            return DEFAULT_DATABASE_URL
+        return v
 
     # Datadog (optional)
     dd_api_key: str = ""

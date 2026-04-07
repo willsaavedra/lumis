@@ -7,6 +7,9 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Matches docker-compose `POSTGRES_DB` default (`horion`).
+DEFAULT_DATABASE_URL = "postgresql+asyncpg://sre:local_only@postgres:5432/horion"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -25,7 +28,14 @@ class Settings(BaseSettings):
     allowed_origins: list[str] = ["http://localhost:3000"]
 
     # Database
-    database_url: str = "postgresql+asyncpg://sre:local_only@postgres:5432/lumis"
+    database_url: str = Field(default=DEFAULT_DATABASE_URL)
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _database_url_non_empty(cls, v: object) -> object:
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            return DEFAULT_DATABASE_URL
+        return v
 
     # Redis
     redis_url: str = "redis://redis:6379/0"
