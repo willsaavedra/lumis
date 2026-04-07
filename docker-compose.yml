@@ -30,21 +30,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  web:
-    build:
-      context: ./apps/web
-      dockerfile: Dockerfile
-      target: dev
-    ports:
-      - "3000:3000"
-    environment:
-      # In dev: point to nginx gateway (https) or directly to api (http).
-      # Use https://localhost when working through the gateway.
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
-    depends_on:
-      api:
-        condition: service_healthy
-
   api:
     build:
       context: .

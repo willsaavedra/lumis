@@ -1,15 +1,16 @@
 .PHONY: dev-up up down build logs logs-api logs-agent logs-worker \
         shell-api shell-db migrate migration seed test test-api test-agent \
-        analyze web-deploy web-build-cf k8s-deploy k8s-logs clean stripe-listen stripe-fixture
+        analyze k8s-deploy k8s-logs clean stripe-listen stripe-fixture
 
 # ── Development ─────────────────────────────────────────────────────────────
 
 dev-up: build up wait-healthy migrate seed
-	@echo "✓ Lumis is running at http://localhost:3000"
+	@echo "✓ Stack is running"
 	@echo "  API:     http://localhost:8000"
 	@echo "  Docs:    http://localhost:8000/docs"
 	@echo "  Flower:  http://localhost:5555"
 	@echo "  MinIO:   http://localhost:9001  (minioadmin / minioadmin)"
+	@echo "  Frontend: horion-frontend repo (Vercel)"
 
 up:
 	docker compose up -d
@@ -84,17 +85,6 @@ stripe-fixture:
 	@echo "Creating Stripe products, prices, and meter..."
 	python scripts/stripe_setup.py
 	@echo "Copy the printed values into your .env.local"
-
-# ── Frontend (CloudFront) ─────────────────────────────────────────────────────
-
-web-deploy:
-	@echo "Building static export for CloudFront…"
-	cd apps/web && npm run deploy:cf
-	@echo "✓ Deployed to s3://ai.horion.pro and invalidated CloudFront cache"
-
-web-build-cf:
-	@echo "Building static export (out/)…"
-	cd apps/web && npm run build:cf
 
 # ── Kubernetes ───────────────────────────────────────────────────────────────
 

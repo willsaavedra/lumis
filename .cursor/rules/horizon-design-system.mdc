@@ -1,12 +1,12 @@
 ---
-description: Horion.pro design system — enforced for all frontend code in apps/web/
-globs: apps/web/**/*.{tsx,ts,css,js}
+description: Horion.pro design system — enforced for all frontend code (horion-frontend repo)
+globs: "**/*.{tsx,ts,css,js}"
 alwaysApply: true
 ---
 
 # Horion.pro Design System v1.0
 
-This rule applies to every file under `apps/web/`. All new components and edits **must** follow these specifications exactly. No deviations.
+This rule applies to every file in the `horion-frontend` repo. All new components and edits **must** follow these specifications exactly. No deviations.
 
 ---
 
