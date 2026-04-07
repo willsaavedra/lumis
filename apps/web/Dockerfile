@@ -4,7 +4,12 @@ RUN apk add --no-cache libc6-compat
 
 FROM base AS deps
 COPY package.json package-lock.json* ./
-RUN npm install --legacy-peer-deps
+# Flaky networks during docker build: retry + longer read timeout (default fetch often fails with ETIMEDOUT)
+RUN npm config set fetch-retries 7 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm config set fetch-timeout 600000 && \
+    npm install --legacy-peer-deps
 
 FROM deps AS dev
 COPY . .

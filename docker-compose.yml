@@ -135,9 +135,9 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: sre
-      POSTGRES_PASSWORD: ij9fnwns9invasd
-      POSTGRES_DB: horion
+      POSTGRES_USER: ${POSTGRES_USER:-sre}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local_only}
+      POSTGRES_DB: ${POSTGRES_DB:-lumis}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/db/init.sql:/docker-entrypoint-initdb.d/init.sql

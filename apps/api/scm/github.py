@@ -239,24 +239,37 @@ class GitHubAdapter(SCMAdapter):
     async def list_installation_repos(self, installation_id: int) -> list[dict]:
         """List all repos the GitHub App installation has access to."""
         token = await self.token_manager.get_installation_token(installation_id)
-        repos = []
+        repos: list[dict] = []
         page = 1
+        per_page = 100
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
         async with httpx.AsyncClient() as client:
             while True:
                 response = await client.get(
                     f"{GITHUB_API}/installation/repositories",
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Accept": "application/vnd.github+json",
-                    },
-                    params={"per_page": 100, "page": page},
+                    headers=headers,
+                    params={"per_page": per_page, "page": page},
+                    timeout=60.0,
                 )
                 response.raise_for_status()
                 data = response.json()
-                repos.extend(data.get("repositories", []))
-                if len(repos) >= data.get("total_count", 0):
+                batch = data.get("repositories") or []
+                if not batch:
+                    break
+                repos.extend(batch)
+                # GitHub may omit total_count; comparing len(repos) >= None raises TypeError (empty list bug).
+                total_raw = data.get("total_count")
+                if total_raw is not None and len(repos) >= int(total_raw):
+                    break
+                if len(batch) < per_page:
                     break
                 page += 1
+
+        log.info("github_list_installation_repos", installation_id=installation_id, count=len(repos))
 
         return [
             {

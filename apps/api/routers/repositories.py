@@ -118,6 +118,8 @@ async def list_available_repositories(current: CurrentUser) -> list[dict]:
                 error=str(e),
                 tenant_id=tenant_id,
                 scm_type=connection.scm_type,
+                installation_id=getattr(connection, "installation_id", None),
+                exc_info=True,
             )
     return combined
 

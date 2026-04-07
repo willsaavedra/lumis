@@ -3,9 +3,17 @@
 import { useState, useEffect, type CSSProperties } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
-import { authApi, teamApi, connectionsApi, vendorsApi, VendorConnection } from '@/lib/api'
+import { API_URL, authApi, teamApi, connectionsApi, vendorsApi, VendorConnection } from '@/lib/api'
 import { useAuthStore } from '@/lib/store'
 import { ObsBackendLogo } from '@/components/ObsBackendLogo'
+
+/** JWT for full-page redirects (?token=) — must match `lumis_token` / zustand auth */
+function getSessionToken(): string {
+  if (typeof window === 'undefined') return ''
+  const fromStore = useAuthStore.getState().token
+  if (fromStore) return fromStore
+  return localStorage.getItem('lumis_token') || ''
+}
 
 const VENDORS = [
   {
@@ -47,6 +55,7 @@ const VENDORS = [
 export default function SettingsPage() {
   const { membershipRole } = useAuthStore()
   const searchParams = useSearchParams()
+  const qc = useQueryClient()
   const [activeTab, setActiveTab] = useState<'api-keys' | 'team' | 'connections' | 'integrations'>('api-keys')
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'admin' | 'operator' | 'viewer'>('operator')
@@ -59,13 +68,15 @@ export default function SettingsPage() {
     if (connected) {
       setActiveTab('connections')
       setConnectionStatus('connected')
+      // Refetch SCM connection + repo catalog (was cached before OAuth completed)
+      void qc.invalidateQueries({ queryKey: ['connections'] })
+      void qc.invalidateQueries({ queryKey: ['available-repos'] })
     }
     if (error) {
       setActiveTab('connections')
       setConnectionStatus('error')
     }
-  }, [searchParams])
-  const qc = useQueryClient()
+  }, [searchParams, qc])
 
   const { data: apiKeys } = useQuery({
     queryKey: ['api-keys'],
@@ -461,8 +472,8 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={() => {
-                  const token = localStorage.getItem('hz-token') || ''
-                  window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/connect/github?token=${encodeURIComponent(token)}`
+                  const token = getSessionToken()
+                  window.location.href = `${API_URL}/connect/github?token=${encodeURIComponent(token)}`
                 }}
                 className="hz-btn hz-btn-outline"
                 style={{ fontSize: '11px', padding: '6px 12px' }}
@@ -500,8 +511,8 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={() => {
-                  const token = localStorage.getItem('hz-token') || ''
-                  window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/connect/gitlab?token=${encodeURIComponent(token)}`
+                  const token = getSessionToken()
+                  window.location.href = `${API_URL}/connect/gitlab?token=${encodeURIComponent(token)}`
                 }}
                 className="hz-btn hz-btn-outline"
                 style={{ fontSize: '11px', padding: '6px 12px' }}
@@ -538,8 +549,8 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={() => {
-                  const token = localStorage.getItem('hz-token') || ''
-                  window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/connect/bitbucket?token=${encodeURIComponent(token)}`
+                  const token = getSessionToken()
+                  window.location.href = `${API_URL}/connect/bitbucket?token=${encodeURIComponent(token)}`
                 }}
                 className="hz-btn hz-btn-outline"
                 style={{ fontSize: '11px', padding: '6px 12px' }}

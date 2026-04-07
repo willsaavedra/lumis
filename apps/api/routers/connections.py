@@ -106,11 +106,11 @@ async def github_callback(
 
     tenant_id = state_data["tenant_id"]
 
-    if not installation_id:
-        return RedirectResponse(url="/settings/connections?error=cancelled")
-
     from apps.api.core.config import settings as app_settings
-    frontend = app_settings.frontend_url
+    frontend = app_settings.frontend_url.rstrip("/")
+
+    if not installation_id:
+        return RedirectResponse(url=f"{frontend}/settings?error=cancelled")
 
     try:
         from apps.api.core.database import get_session_with_tenant
