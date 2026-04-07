@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     s3_endpoint_url: str = "http://minio:9000"
     s3_access_key_id: str = "minioadmin"
     s3_secret_access_key: str = "minioadmin"
-    s3_bucket_name: str = "lumis"
+    s3_bucket_name: str = "horion"
     s3_region: str = "us-east-1"
 
     # Anthropic (LLM generation)
@@ -78,7 +78,7 @@ class Settings(BaseSettings):
 
     # GitHub App
     github_app_id: str = ""
-    github_app_slug: str = "lumis"
+    github_app_slug: str = "horion"
     github_app_private_key_path: str = ""
     github_webhook_secret: str = ""
 
@@ -128,10 +128,11 @@ class Settings(BaseSettings):
         "repository": 15,
     }
 
-    api_base_url: str = "http://localhost:8000"  # env: API_BASE_URL — also used as OAuth redirect base
-    frontend_url: str = "http://localhost:3000"  # env: FRONTEND_URL — Google/Stripe redirect browser here
+    api_base_url: str = "http://localhost:8000"   # env: API_BASE_URL — also used as OAuth redirect base
+    frontend_url: str = "http://localhost:3000"   # env: FRONTEND_URL — Google/Stripe redirect browser here
 
-    # Celery worker → Lumis Agent HTTP (analysis graph runs in agent process)
+    # Celery worker → Horion Agent HTTP (analysis graph runs in agent process)
+    # Docker Compose overrides this to http://agent:8001 via the environment: section.
     agent_base_url: str = "http://localhost:8001"
 
     # Google OAuth (Sign in with Google) — leave empty to disable

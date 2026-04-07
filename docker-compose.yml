@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # ── API Gateway (nginx + Let's Encrypt TLS) ───────────────────────────────
   # Requires two env vars in .env.local (or exported):
@@ -40,18 +38,13 @@ services:
     volumes:
       - ./horion-git-hub.pem:/run/secrets/github_private_key:ro
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://sre:local_only@postgres:5432/horion}
+      # Docker-internal service URLs — override any localhost values in .env.local
+      - DATABASE_URL=postgresql+asyncpg://sre:local_only@postgres:5432/horion
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - S3_ENDPOINT_URL=http://minio:9000
-      - S3_ACCESS_KEY_ID=minioadmin
-      - S3_SECRET_ACCESS_KEY=minioadmin
-      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
-      - S3_REGION=us-east-1
-      - ENV=local
-      - DEBUG=true
-      - LOG_LEVEL=debug
+      - AGENT_BASE_URL=http://agent:8001
     env_file:
       - .env.local
     depends_on:
@@ -94,17 +87,13 @@ services:
     volumes:
       - ./lumis-local-dev.2026-04-01.private-key.pem:/run/secrets/github_private_key:ro
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://sre:local_only@postgres:5432/horion}
+      # Docker-internal service URLs — override any localhost values in .env.local
+      - DATABASE_URL=postgresql+asyncpg://sre:local_only@postgres:5432/horion
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - S3_ENDPOINT_URL=http://minio:9000
-      - S3_ACCESS_KEY_ID=minioadmin
-      - S3_SECRET_ACCESS_KEY=minioadmin
-      - S3_BUCKET_NAME=horion
       - AGENT_BASE_URL=http://agent:8001
-      - ENV=local
-      - DEBUG=true
     env_file:
       - .env.local
     depends_on:
