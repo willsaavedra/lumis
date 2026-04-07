@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . --ext .ts,.tsx"
+    "lint": "eslint . --ext .ts,.tsx",
+     "deploy": "npm run build && aws s3 cp dist/ s3://ai.horion.pro --recursive --region us-east-1  && aws cloudfront create-invalidation --region us-east-1  --distribution-id E1SZTLANRZNZ9 --paths '/*'"
   },
   "dependencies": {
     "next": "14.2.18",
