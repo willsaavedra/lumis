@@ -17,8 +17,8 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      - DOMAIN=${DOMAIN}
-      - CERTBOT_EMAIL=${CERTBOT_EMAIL}
+      - DOMAIN=${DOMAIN:-api.horion.pro}
+      - CERTBOT_EMAIL=${CERTBOT_EMAIL:-ops@horion.pro}
       - CERTBOT_STAGING=${CERTBOT_STAGING:-false}
     env_file:
       - .env.local
