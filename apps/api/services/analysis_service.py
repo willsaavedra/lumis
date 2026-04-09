@@ -8,7 +8,7 @@ from typing import Any
 
 import structlog
 from fastapi import HTTPException, status
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -59,10 +59,6 @@ async def enqueue_analysis_from_webhook(
         return None
 
     tenant_id = str(repo.tenant_id)
-
-    # Set tenant RLS context so that snapshot_tags_for_job can read repo_tags
-    # (the webhook session is created without RLS — we scope it here once we know the tenant)
-    await session.execute(text(f"SET LOCAL app.tenant_id = '{tenant_id}'"))
 
     if request.commit_sha and request.pr_number:
         existing = await session.execute(
