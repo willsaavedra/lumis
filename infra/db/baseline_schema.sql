@@ -362,48 +362,44 @@ CREATE TABLE finding_feedback (
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- KNOWLEDGE BASE (pgvector)
+-- knowledge_chunks requires the pgvector extension. If the extension is not
+-- available the migration Python code skips this section gracefully.
 -- ═══════════════════════════════════════════════════════════════════════════
 
-DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'vector') THEN
-    EXECUTE 'CREATE EXTENSION IF NOT EXISTS vector';
-    EXECUTE '
-      CREATE TABLE IF NOT EXISTS knowledge_chunks (
-        id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-        tenant_id   UUID        REFERENCES tenants(id) ON DELETE CASCADE,
-        source_type TEXT        NOT NULL,
-        content     TEXT        NOT NULL,
-        embedding   vector(1536) NOT NULL,
-        metadata    JSONB       DEFAULT ''{}'',
-        language    TEXT,
-        pillar      TEXT,
-        repo_id     UUID        REFERENCES repositories(id) ON DELETE CASCADE,
-        expires_at  TIMESTAMPTZ,
-        created_at  TIMESTAMPTZ DEFAULT now()
-      )';
-    EXECUTE '
-      CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
-        ON knowledge_chunks USING hnsw (embedding vector_cosine_ops)
-        WITH (m = 16, ef_construction = 64)';
-    EXECUTE '
-      CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_tenant_source_lang
-        ON knowledge_chunks (tenant_id, source_type, language)';
-    EXECUTE '
-      CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_expires_at
-        ON knowledge_chunks (expires_at) WHERE expires_at IS NOT NULL';
-    EXECUTE 'ALTER TABLE knowledge_chunks ENABLE ROW LEVEL SECURITY';
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_policies
-      WHERE tablename = ''knowledge_chunks'' AND policyname = ''rag_isolation''
-    ) THEN
-      EXECUTE '
-        CREATE POLICY rag_isolation ON knowledge_chunks
-          USING (tenant_id IS NULL OR tenant_id = current_setting(''app.tenant_id'')::UUID)';
-    END IF;
-  ELSE
-    RAISE NOTICE 'pgvector not available — skipping knowledge_chunks table';
-  END IF;
-END $$;
+-- __PGVECTOR_START__
+
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS knowledge_chunks (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   UUID        REFERENCES tenants(id) ON DELETE CASCADE,
+  source_type TEXT        NOT NULL,
+  content     TEXT        NOT NULL,
+  embedding   vector(1536) NOT NULL,
+  metadata    JSONB       DEFAULT '{}',
+  language    TEXT,
+  pillar      TEXT,
+  repo_id     UUID        REFERENCES repositories(id) ON DELETE CASCADE,
+  expires_at  TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
+  ON knowledge_chunks USING hnsw (embedding vector_cosine_ops)
+  WITH (m = 16, ef_construction = 64);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_tenant_source_lang
+  ON knowledge_chunks (tenant_id, source_type, language);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_expires_at
+  ON knowledge_chunks (expires_at) WHERE expires_at IS NOT NULL;
+
+ALTER TABLE knowledge_chunks ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY rag_isolation ON knowledge_chunks
+  USING (tenant_id IS NULL OR tenant_id = current_setting('app.tenant_id', TRUE)::UUID);
+
+-- __PGVECTOR_END__
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- INDEXES
