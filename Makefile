@@ -1,5 +1,5 @@
 .PHONY: dev-up up down build logs logs-api logs-agent logs-worker \
-        shell-api shell-db migrate migration seed test test-api test-agent \
+        shell-api shell-db migrate migrate-stamp migration seed test test-api test-agent \
         analyze k8s-deploy k8s-logs clean stripe-listen stripe-fixture
 
 # Celery worker container count (horizontal scale). Example: `make up WORKER_REPLICAS=3`
@@ -46,6 +46,10 @@ shell-db:
 
 migrate:
 	docker compose exec api alembic -c apps/api/alembic.ini upgrade head
+
+migrate-stamp:
+	@echo "Stamping existing DB to current head (use on DBs already at the latest schema)…"
+	docker compose exec api alembic -c apps/api/alembic.ini stamp head
 
 migration:
 	@if [ -z "$(name)" ]; then echo "Usage: make migration name=<description>"; exit 1; fi
