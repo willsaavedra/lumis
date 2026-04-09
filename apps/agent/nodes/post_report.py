@@ -117,6 +117,16 @@ async def post_report_node(state: AgentState) -> dict:
     except Exception as e:
         log.error("save_to_db_failed", job_id=job_id, error=str(e))
 
+    try:
+        repo_context = state.get("repo_context") or {}
+        request = state.get("request", {})
+        repo_id = request.get("repo_id")
+        detected_lang = _detect_primary_language(state)
+        if repo_id and detected_lang:
+            await _upsert_auto_tags(tenant_id, repo_id, detected_lang)
+    except Exception as e:
+        log.warning("auto_tag_failed", job_id=job_id, error=str(e))
+
     # Post to SCM if PR analysis
     request = state.get("request", {})
     pr_number = request.get("pr_number")
@@ -244,6 +254,66 @@ async def _save_to_db(
         log.info("ingest_history_enqueued", job_id=job_id)
     except Exception as e:
         log.warning("ingest_history_enqueue_failed", job_id=job_id, error=str(e))
+
+
+_LANG_INDICATORS: dict[str, list[str]] = {
+    "go": [".go", "go.mod", "go.sum"],
+    "python": [".py", "requirements.txt", "pyproject.toml", "setup.py", "Pipfile"],
+    "java": [".java", "pom.xml", "build.gradle"],
+    "typescript": [".ts", ".tsx", "tsconfig.json"],
+    "node": [".js", ".mjs", "package.json"],
+    "ruby": [".rb", "Gemfile"],
+    "rust": [".rs", "Cargo.toml"],
+}
+
+
+def _detect_primary_language(state: AgentState) -> str | None:
+    """Best-effort language detection from analyzed file extensions."""
+    changed_files = state.get("changed_files") or []
+    repo_context = state.get("repo_context") or {}
+
+    explicit = repo_context.get("language")
+    if explicit and isinstance(explicit, list) and explicit:
+        lang = explicit[0].lower()
+        for k in _LANG_INDICATORS:
+            if k in lang:
+                return k
+        return lang
+
+    counts: dict[str, int] = {}
+    for f in changed_files:
+        path = (f.get("path") or f.get("file_path") or "") if isinstance(f, dict) else str(f)
+        for lang, exts in _LANG_INDICATORS.items():
+            if any(path.endswith(ext) for ext in exts):
+                counts[lang] = counts.get(lang, 0) + 1
+
+    if not counts:
+        return None
+    return max(counts, key=counts.get)
+
+
+async def _upsert_auto_tags(tenant_id: str, repo_id: str, language: str) -> None:
+    """Insert or update an auto-detected 'lang' tag on the repo."""
+    from sqlalchemy import select, text as sa_text
+
+    from apps.api.core.database import get_session_with_tenant
+    from apps.api.models.tag_system import RepoTag
+
+    async with get_session_with_tenant(tenant_id) as session:
+        rid = uuid.UUID(repo_id)
+        tid = uuid.UUID(tenant_id)
+        existing = await session.execute(
+            select(RepoTag).where(RepoTag.repo_id == rid, RepoTag.key == "lang")
+        )
+        rt = existing.scalar_one_or_none()
+        if rt:
+            if rt.source == "auto":
+                rt.value = language
+        else:
+            session.add(RepoTag(
+                tenant_id=tid, repo_id=rid, key="lang", value=language, source="auto",
+            ))
+    log.info("auto_tag_upserted", repo_id=repo_id, key="lang", value=language)
 
 
 async def _post_pr_comment(request: dict, findings: list[dict], scores: dict) -> None:

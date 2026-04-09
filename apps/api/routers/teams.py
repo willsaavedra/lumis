@@ -180,7 +180,7 @@ async def patch_team(team_id: str, body: PatchTeamRequest, current: TenantAdmin)
     return out
 
 
-@router.delete("/{team_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{team_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_team(team_id: str, current: TenantAdmin) -> None:
     _admin, tenant_id, _ = current
     try:
@@ -199,7 +199,7 @@ async def delete_team(team_id: str, current: TenantAdmin) -> None:
     log.info("team_deleted", team_id=team_id, tenant_id=tenant_id)
 
 
-@router.post("/{team_id}/members", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/{team_id}/members", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def add_team_members(team_id: str, body: AddTeamMembersRequest, current: TenantAdmin) -> None:
     _admin, tenant_id, _ = current
     try:
@@ -228,7 +228,7 @@ async def add_team_members(team_id: str, body: AddTeamMembersRequest, current: T
         await session.flush()
 
 
-@router.delete("/{team_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{team_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def remove_team_member(team_id: str, user_id: str, current: TenantAdmin) -> None:
     _admin, tenant_id, _ = current
     try:

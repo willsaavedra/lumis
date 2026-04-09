@@ -205,6 +205,50 @@ async def score_node(state: AgentState) -> dict:
         + traces_score * 0.30
     )
 
+    # ── Tag-aware scoring modifiers ─────────────────────────────────────
+    tag_modifiers_applied: list[str] = []
+    try:
+        analysis_tags = await _load_analysis_tags(state)
+        tag_by_key = {t["key"]: t["value"] for t in analysis_tags}
+
+        criticality = tag_by_key.get("criticality", "").lower()
+        env = tag_by_key.get("env", "").lower()
+
+        if criticality == "critical" and global_score < 60:
+            global_score = max(global_score, 60)
+            tag_modifiers_applied.append("criticality=critical floor 60")
+
+        if env == "production" and criticality in ("critical", "high"):
+            penalty = 5
+            global_score = max(0, global_score - penalty)
+            tag_modifiers_applied.append(f"production+{criticality} penalty -{penalty}")
+
+        if env == "staging":
+            boost = 3
+            global_score = min(100, global_score + boost)
+            tag_modifiers_applied.append(f"staging relaxation +{boost}")
+
+        if criticality == "low" and env not in ("production",):
+            weight_reduction = 0.15
+            global_score = min(100, int(global_score * (1 + weight_reduction)))
+            tag_modifiers_applied.append("low-crit+non-prod weight reduction")
+
+        missing_required = await _check_missing_required_tags(state, tag_by_key)
+        for mkey in missing_required:
+            findings.append({
+                "pillar": "compliance",
+                "severity": "warning",
+                "dimension": "compliance",
+                "title": f"Missing required tag: {mkey}",
+                "description": f"Repository is missing the required tag '{mkey}'. Add it in repository settings.",
+                "suggestion": f"Add the '{mkey}' tag to this repository to improve compliance tracking.",
+            })
+
+        if tag_modifiers_applied:
+            log.info("tag_modifiers_applied", modifiers=tag_modifiers_applied, job_id=state.get("job_id"))
+    except Exception as e:
+        log.warning("tag_modifier_failed", error=str(e), job_id=state.get("job_id"))
+
     scores = {
         "cost": cost_score,
         "snr": snr_score,
@@ -263,3 +307,51 @@ def _score_pillar(findings: list[dict], pillar: str) -> int:
     for f in (f for f in findings if f.get("pillar") == pillar):
         score -= _penalty("pillar", f.get("severity", "info"), pillar)
     return max(0, score)
+
+
+async def _load_analysis_tags(state: AgentState) -> list[dict]:
+    """Load analysis_tags for the current job from the database."""
+    job_id = state.get("job_id")
+    tenant_id = state.get("tenant_id")
+    if not job_id or not tenant_id:
+        return []
+
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from apps.api.core.database import get_session_with_tenant
+    from apps.api.models.tag_system import AnalysisTag
+
+    async with get_session_with_tenant(tenant_id) as session:
+        result = await session.execute(
+            select(AnalysisTag.key, AnalysisTag.value).where(
+                AnalysisTag.job_id == _uuid.UUID(job_id),
+            )
+        )
+        return [{"key": r.key, "value": r.value} for r in result.all()]
+
+
+async def _check_missing_required_tags(state: AgentState, tag_by_key: dict[str, str]) -> list[str]:
+    """Return list of required tag keys that are missing from the analysis tags."""
+    tenant_id = state.get("tenant_id")
+    if not tenant_id:
+        return []
+
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from apps.api.core.database import get_session_with_tenant
+    from apps.api.models.tag_system import TagDefinition
+
+    async with get_session_with_tenant(tenant_id) as session:
+        result = await session.execute(
+            select(TagDefinition.key).where(
+                TagDefinition.tenant_id == _uuid.UUID(tenant_id),
+                TagDefinition.required == True,
+            )
+        )
+        required_keys = [r.key for r in result.all()]
+
+    return [k for k in required_keys if k not in tag_by_key]

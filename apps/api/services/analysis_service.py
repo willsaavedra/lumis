@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from apps.api.billing.billing_gate import ANALYSIS_COSTS, BillingGate
 from apps.api.models.analysis import AnalysisJob
 from apps.api.models.scm import Repository
+from apps.api.services.tag_service import snapshot_tags_for_job
 
 _CONTEXT_REFRESH_INTERVAL = timedelta(days=30)
 
@@ -104,6 +105,14 @@ async def enqueue_analysis_from_webhook(
     )
     session.add(job)
     await session.flush()
+
+    try:
+        await snapshot_tags_for_job(
+            session, tenant_id, job.id, repo.id,
+            request.trigger, request.branch_ref, request.pr_number, analysis_type,
+        )
+    except Exception as e:
+        log.warning("snapshot_tags_failed", job_id=str(job.id), error=str(e))
 
     from apps.worker.tasks import run_analysis
     run_analysis.delay(str(job.id), reservation_token)
@@ -308,6 +317,14 @@ async def enqueue_manual_analysis(
     )
     session.add(job)
     await session.flush()
+
+    try:
+        await snapshot_tags_for_job(
+            session, tenant_id, job.id, repo.id,
+            "manual", ref, None, analysis_type,
+        )
+    except Exception as e:
+        log.warning("snapshot_tags_failed", job_id=str(job.id), error=str(e))
 
     from apps.worker.tasks import run_analysis
     run_analysis.delay(str(job.id), reservation_token)

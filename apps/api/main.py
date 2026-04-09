@@ -13,6 +13,8 @@ from apps.api.routers import tags as tags_router
 from apps.api.routers import reports as reports_router
 from apps.api.routers.vendors import router as vendors_router
 from apps.api.routers.rag import router as rag_router
+from apps.api.routers.tag_definitions import router as tag_defs_router, repo_tags_router, tag_values_router
+from apps.api.routers.analytics import router as analytics_router
 
 configure_logging()
 log = structlog.get_logger(__name__)
@@ -52,6 +54,10 @@ def create_app() -> FastAPI:
     app.include_router(reports_router.router, prefix="/api/v1/reports", tags=["reports"])
     app.include_router(vendors_router, prefix="/api/v1/vendors", tags=["vendors"])
     app.include_router(rag_router)
+    app.include_router(tag_defs_router, prefix="/api/v1/tags/definitions", tags=["tag-definitions"])
+    app.include_router(repo_tags_router, prefix="/api/v1/repositories", tags=["repo-tags"])
+    app.include_router(tag_values_router, prefix="/api/v1/tags", tags=["tag-values"])
+    app.include_router(analytics_router, prefix="/api/v1/analytics", tags=["analytics"])
 
     @app.get("/health", tags=["health"])
     async def health() -> dict:

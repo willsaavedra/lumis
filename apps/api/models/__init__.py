@@ -5,6 +5,7 @@ from apps.api.models.analysis import AnalysisJob, AnalysisResult, CostEvent, Fin
 from apps.api.models.billing import BillingEvent, StripeEvent
 from apps.api.models.vendor import VendorConnection
 from apps.api.models.teams import RepositoryTag, Tag, Team, TeamMembership
+from apps.api.models.tag_system import AnalysisTag, RepoTag as MetadataRepoTag, TagDefinition
 
 __all__ = [
     "ApiKey", "Organization", "Tenant", "User",
@@ -13,4 +14,5 @@ __all__ = [
     "BillingEvent", "StripeEvent",
     "VendorConnection",
     "Tag", "Team", "TeamMembership", "RepositoryTag",
+    "TagDefinition", "MetadataRepoTag", "AnalysisTag",
 ]

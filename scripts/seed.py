@@ -29,6 +29,7 @@ async def seed() -> None:
     from apps.api.models.scm import ScmConnection, Repository
     from apps.api.models.analysis import AnalysisJob, AnalysisResult, Finding
     from apps.api.models.billing import BillingEvent
+    from apps.api.models.tag_system import TagDefinition, RepoTag, AnalysisTag
     from sqlalchemy import text
 
     async with AsyncSessionFactory() as session:
@@ -149,6 +150,23 @@ async def seed() -> None:
                 "clone_url": "https://github.com/acme-corp/notification-worker.git",
                 "schedule_enabled": False,
             },
+            {
+                "id": uuid.UUID("77777777-7777-7777-7777-777777777774"),
+                "scm_repo_id": "111111114",
+                "full_name": "acme-corp/auth-gateway",
+                "default_branch": "main",
+                "clone_url": "https://github.com/acme-corp/auth-gateway.git",
+                "schedule_enabled": True,
+                "schedule_cron": "0 9 * * 1",
+            },
+            {
+                "id": uuid.UUID("77777777-7777-7777-7777-777777777775"),
+                "scm_repo_id": "111111115",
+                "full_name": "acme-corp/analytics-pipeline",
+                "default_branch": "main",
+                "clone_url": "https://github.com/acme-corp/analytics-pipeline.git",
+                "schedule_enabled": False,
+            },
         ]
 
         repo_objs = []
@@ -173,6 +191,8 @@ async def seed() -> None:
         checkout_repo_id = uuid.UUID("77777777-7777-7777-7777-777777777771")
         inventory_repo_id = uuid.UUID("77777777-7777-7777-7777-777777777772")
         notification_repo_id = uuid.UUID("77777777-7777-7777-7777-777777777773")
+        auth_repo_id = uuid.UUID("77777777-7777-7777-7777-777777777774")
+        analytics_repo_id = uuid.UUID("77777777-7777-7777-7777-777777777775")
 
         jobs_data = [
             {
@@ -346,6 +366,84 @@ async def seed() -> None:
                 ],
                 "created_at": NOW - timedelta(days=14),
             },
+            {
+                "repo_id": auth_repo_id,
+                "trigger": "pr",
+                "pr_number": 31,
+                "commit_sha": "f6a1b2c3d4e5f6a1b2c3",
+                "analysis_type": "full",
+                "credits_consumed": 3,
+                "score_global": 73,
+                "score_metrics": 70,
+                "score_logs": 80,
+                "score_traces": 69,
+                "findings_data": [
+                    {
+                        "pillar": "traces",
+                        "severity": "warning",
+                        "dimension": "coverage",
+                        "title": "Missing span on auth middleware",
+                        "description": "The JWT validation middleware processes every request but has no trace span. Auth latency is invisible in distributed traces.",
+                        "file_path": "cmd/gateway/middleware.go",
+                        "line_start": 45,
+                        "line_end": 62,
+                        "suggestion": 'ctx, span := otel.Tracer("auth").Start(ctx, "jwt.validate")\ndefer span.End()',
+                        "estimated_monthly_cost_impact": 0.0,
+                    },
+                    {
+                        "pillar": "metrics",
+                        "severity": "critical",
+                        "dimension": "cost",
+                        "title": "Unbounded cardinality on user_id label",
+                        "description": "auth_requests_total metric uses user_id as a label, creating potentially millions of time series.",
+                        "file_path": "internal/metrics/auth.go",
+                        "line_start": 18,
+                        "line_end": 25,
+                        "suggestion": 'Remove user_id from label set. Use exemplars or log correlation instead.',
+                        "estimated_monthly_cost_impact": 320.0,
+                    },
+                ],
+                "created_at": NOW - timedelta(days=1, hours=5),
+            },
+            {
+                "repo_id": analytics_repo_id,
+                "trigger": "manual",
+                "pr_number": None,
+                "commit_sha": "a1b2c3d4e5f6a7b8c9d0",
+                "analysis_type": "full",
+                "credits_consumed": 3,
+                "score_global": 55,
+                "score_metrics": 40,
+                "score_logs": 65,
+                "score_traces": 60,
+                "findings_data": [
+                    {
+                        "pillar": "logs",
+                        "severity": "warning",
+                        "dimension": "snr",
+                        "title": "Noisy Spark executor logs",
+                        "description": "Spark executors emit DEBUG-level logs for every partition processed. At 50k partitions/day, this generates ~4GB of unstructured logs.",
+                        "file_path": "src/main/scala/Pipeline.scala",
+                        "line_start": 120,
+                        "line_end": 135,
+                        "suggestion": "Set log level to WARN for org.apache.spark.executor and add structured job-level logging instead.",
+                        "estimated_monthly_cost_impact": 150.0,
+                    },
+                    {
+                        "pillar": "metrics",
+                        "severity": "critical",
+                        "dimension": "coverage",
+                        "title": "No pipeline throughput metrics",
+                        "description": "The analytics pipeline has no metrics for records processed, pipeline latency, or error rates. SLA compliance is unmeasurable.",
+                        "file_path": "src/main/scala/Pipeline.scala",
+                        "line_start": 1,
+                        "line_end": 15,
+                        "suggestion": "Add Micrometer counters: pipeline.records.processed, pipeline.batch.duration, pipeline.errors",
+                        "estimated_monthly_cost_impact": 0.0,
+                    },
+                ],
+                "created_at": NOW - timedelta(days=3, hours=2),
+            },
         ]
 
         for i, job_data in enumerate(jobs_data):
@@ -419,12 +517,105 @@ async def seed() -> None:
             created_at=NOW - timedelta(days=1),
         ))
 
+        # ── Tag Definitions ────────────────────────────────────────────────
+        _tag_defs = [
+            {"key": "team", "label": "Squad / Team", "description": "Which team owns this repository", "required": True, "allowed_values": None, "color_class": "tag-team", "sort_order": 1},
+            {"key": "env", "label": "Environment", "description": "Deployment environment", "required": True, "allowed_values": ["production", "staging", "dev", "sandbox"], "color_class": "tag-env", "sort_order": 2},
+            {"key": "criticality", "label": "Business Criticality", "description": "How critical this service is", "required": True, "allowed_values": ["critical", "high", "medium", "low"], "color_class": "tag-criticality", "sort_order": 3},
+            {"key": "domain", "label": "Business Domain", "description": "Business domain", "required": False, "allowed_values": None, "color_class": "tag-domain", "sort_order": 4},
+            {"key": "cost-center", "label": "Cost Center", "description": "Cost allocation center", "required": False, "allowed_values": None, "color_class": "tag-cost-center", "sort_order": 5},
+            {"key": "lang", "label": "Language", "description": "Primary programming language", "required": False, "allowed_values": ["go", "python", "java", "node", "typescript", "ruby", "rust"], "color_class": "tag-service", "sort_order": 6},
+        ]
+        for td in _tag_defs:
+            session.add(TagDefinition(tenant_id=tenant_id, **td))
+        await session.flush()
+
+        # ── Repo Tags ──────────────────────────────────────────────────────
+        _repo_tags = {
+            checkout_repo_id: [
+                ("team", "payments", "user"),
+                ("env", "production", "user"),
+                ("criticality", "critical", "user"),
+                ("domain", "commerce", "user"),
+                ("cost-center", "eng-payments", "user"),
+                ("lang", "go", "auto"),
+            ],
+            inventory_repo_id: [
+                ("team", "platform", "user"),
+                ("env", "production", "user"),
+                ("criticality", "high", "user"),
+                ("domain", "supply-chain", "user"),
+                ("lang", "python", "auto"),
+            ],
+            notification_repo_id: [
+                ("team", "platform", "user"),
+                ("env", "staging", "user"),
+                ("criticality", "medium", "user"),
+                ("domain", "communications", "user"),
+                ("lang", "typescript", "auto"),
+            ],
+            auth_repo_id: [
+                ("team", "security", "user"),
+                ("env", "production", "user"),
+                ("criticality", "critical", "user"),
+                ("domain", "identity", "user"),
+                ("cost-center", "eng-security", "user"),
+                ("lang", "go", "auto"),
+            ],
+            analytics_repo_id: [
+                ("team", "data", "user"),
+                ("env", "production", "user"),
+                ("criticality", "high", "user"),
+                ("domain", "analytics", "user"),
+                ("cost-center", "eng-data", "user"),
+                ("lang", "java", "auto"),
+            ],
+        }
+        for rid, tag_list in _repo_tags.items():
+            for key, value, source in tag_list:
+                session.add(RepoTag(tenant_id=tenant_id, repo_id=rid, key=key, value=value, source=source))
+        await session.flush()
+
+        # ── Analysis Tags (snapshot for each job) ──────────────────────────
+        _system_tags_by_job: dict[int, list[tuple[str, str]]] = {
+            0: [("trigger", "pr"), ("branch", "main"), ("type", "full"), ("pr", "142")],
+            1: [("trigger", "pr"), ("branch", "main"), ("type", "full"), ("pr", "89")],
+            2: [("trigger", "manual"), ("branch", "main"), ("type", "full")],
+            3: [("trigger", "pr"), ("branch", "main"), ("type", "quick"), ("pr", "138")],
+            4: [("trigger", "scheduled"), ("branch", "main"), ("type", "full")],
+            5: [("trigger", "pr"), ("branch", "main"), ("type", "full"), ("pr", "31")],
+            6: [("trigger", "manual"), ("branch", "main"), ("type", "full")],
+        }
+        _repo_for_job = [
+            checkout_repo_id, inventory_repo_id, notification_repo_id,
+            checkout_repo_id, inventory_repo_id,
+            auth_repo_id, analytics_repo_id,
+        ]
+
+        all_jobs_result = await session.execute(
+            text("SELECT id, repo_id FROM analysis_jobs WHERE tenant_id = :tid ORDER BY created_at"),
+            {"tid": str(tenant_id)},
+        )
+        all_jobs = all_jobs_result.fetchall()
+
+        for idx, (jid, repo_id_raw) in enumerate(all_jobs):
+            repo_id_val = uuid.UUID(str(repo_id_raw)) if not isinstance(repo_id_raw, uuid.UUID) else repo_id_raw
+            job_uuid = uuid.UUID(str(jid)) if not isinstance(jid, uuid.UUID) else jid
+            repo_tag_list = _repo_tags.get(repo_id_val, [])
+            for key, value, source in repo_tag_list:
+                session.add(AnalysisTag(tenant_id=tenant_id, job_id=job_uuid, key=key, value=value, source=source))
+            sys_tags = _system_tags_by_job.get(idx, [])
+            for key, value in sys_tags:
+                session.add(AnalysisTag(tenant_id=tenant_id, job_id=job_uuid, key=key, value=value, source="system"))
+        await session.flush()
+
         await session.commit()
         print("✓ Seed complete!")
         print("  Tenant:   Acme Corp (plan=growth, 653 credits remaining)")
         print("  Login:    owner@acme.com / demo1234")
-        print("  Repos:    3 active (checkout-api, inventory-service, notification-worker)")
-        print("  Analyses: 5 completed (scores: 67, 81, 44, 72, 88)")
+        print("  Repos:    5 active (checkout-api, inventory-service, notification-worker, auth-gateway, analytics-pipeline)")
+        print("  Analyses: 7 completed (scores: 67, 81, 44, 72, 88, 73, 55)")
+        print("  Tags:     6 definitions, repo_tags + analysis_tags seeded")
 
 
 if __name__ == "__main__":

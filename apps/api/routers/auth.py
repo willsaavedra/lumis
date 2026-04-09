@@ -27,6 +27,7 @@ from apps.api.core.security import (
     verify_password,
 )
 from apps.api.models.auth import ApiKey, Organization, Tenant, TenantInvite, TenantMembership, User
+from apps.api.services.tag_service import seed_default_tag_definitions
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
@@ -280,6 +281,8 @@ async def _find_or_create_google_user(session: AsyncSession, profile: dict) -> U
     session.add(api_key)
     await session.flush()
 
+    await seed_default_tag_definitions(session, tenant.id)
+
     log.info("google_user_created", email=email_norm, user_id=str(user.id))
     return user
 
@@ -341,6 +344,9 @@ async def signup(
             scope=["*"],
         )
         session.add(api_key)
+
+        # Seed default tag definitions for the new tenant
+        await seed_default_tag_definitions(session, tenant.id)
 
         if body.invite_token:
             token_hash = _invite_token_hash(body.invite_token.strip())

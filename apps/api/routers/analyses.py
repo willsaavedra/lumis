@@ -19,6 +19,7 @@ from apps.api.core.database import get_session_with_tenant
 from apps.api.core.deps import CurrentUser
 from apps.api.models.analysis import AnalysisJob, AnalysisResult, Finding, FindingFeedback, FEEDBACK_SIGNALS, FEEDBACK_TARGETS
 from apps.api.models.scm import Repository
+from apps.api.models.tag_system import AnalysisTag
 from apps.api.models.teams import RepositoryTag, Tag
 from apps.api.scm.repo_web_url import repo_web_url as build_repo_web_url
 from apps.api.services.tag_access import assert_repo_accessible, effective_tag_ids_for_user, repository_visible_predicate
@@ -564,6 +565,31 @@ async def get_analysis(job_id: str, current: CurrentUser) -> AnalysisJobResponse
         if not ok:
             raise HTTPException(status_code=404, detail="Analysis not found.")
     return _job_to_response(job)
+
+
+@router.get("/{job_id}/tags")
+async def get_analysis_tags(job_id: str, current: CurrentUser) -> list[dict]:
+    """Return the analysis_tags snapshot for a given job."""
+    user, tenant_id, membership_role = current
+    async with get_session_with_tenant(tenant_id) as session:
+        job = (await session.execute(
+            select(AnalysisJob).where(AnalysisJob.id == uuid.UUID(job_id))
+        )).scalar_one_or_none()
+        if not job:
+            raise HTTPException(status_code=404, detail="Analysis not found.")
+        ok = await assert_repo_accessible(
+            session, tenant_id=tenant_id, user_id=user.id,
+            membership_role=membership_role, repo_id=job.repo_id,
+        )
+        if not ok:
+            raise HTTPException(status_code=404, detail="Analysis not found.")
+        rows = (await session.execute(
+            select(AnalysisTag).where(AnalysisTag.job_id == uuid.UUID(job_id))
+        )).scalars().all()
+    return [
+        {"key": r.key, "value": r.value, "source": r.source}
+        for r in rows
+    ]
 
 
 @router.post("/{job_id}/fix-pr", status_code=status.HTTP_202_ACCEPTED)
