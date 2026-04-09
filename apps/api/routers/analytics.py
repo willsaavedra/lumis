@@ -238,10 +238,10 @@ async def score_history(
                 select(
                     date_col,
                     AnalysisTag.value.label("grp"),
-                    func.avg(AnalysisResult.score_global).label("g"),
-                    func.avg(AnalysisResult.score_metrics).label("m"),
-                    func.avg(AnalysisResult.score_logs).label("l"),
-                    func.avg(AnalysisResult.score_traces).label("t"),
+                    func.avg(AnalysisResult.score_global).label("avg_global"),
+                    func.avg(AnalysisResult.score_metrics).label("avg_metrics"),
+                    func.avg(AnalysisResult.score_logs).label("avg_logs"),
+                    func.avg(AnalysisResult.score_traces).label("avg_traces"),
                 )
                 .select_from(AnalysisJob)
                 .join(AnalysisResult, AnalysisResult.job_id == AnalysisJob.id)
@@ -261,10 +261,10 @@ async def score_history(
             return [
                 ScoreHistoryPoint(
                     date=r.bucket.isoformat() if r.bucket else "",
-                    global_score=round(float(r.g), 1) if r.g else None,
-                    metrics=round(float(r.m), 1) if r.m else None,
-                    logs=round(float(r.l), 1) if r.l else None,
-                    traces=round(float(r.t), 1) if r.t else None,
+                    global_score=round(float(r.avg_global), 1) if r.avg_global is not None else None,
+                    metrics=round(float(r.avg_metrics), 1) if r.avg_metrics is not None else None,
+                    logs=round(float(r.avg_logs), 1) if r.avg_logs is not None else None,
+                    traces=round(float(r.avg_traces), 1) if r.avg_traces is not None else None,
                     group=r.grp,
                 )
                 for r in rows
@@ -273,10 +273,10 @@ async def score_history(
         q = (
             select(
                 date_col,
-                func.avg(AnalysisResult.score_global).label("g"),
-                func.avg(AnalysisResult.score_metrics).label("m"),
-                func.avg(AnalysisResult.score_logs).label("l"),
-                func.avg(AnalysisResult.score_traces).label("t"),
+                func.avg(AnalysisResult.score_global).label("avg_global"),
+                func.avg(AnalysisResult.score_metrics).label("avg_metrics"),
+                func.avg(AnalysisResult.score_logs).label("avg_logs"),
+                func.avg(AnalysisResult.score_traces).label("avg_traces"),
             )
             .select_from(AnalysisJob)
             .join(AnalysisResult, AnalysisResult.job_id == AnalysisJob.id)
@@ -296,10 +296,10 @@ async def score_history(
     return [
         ScoreHistoryPoint(
             date=r.bucket.isoformat() if r.bucket else "",
-            global_score=round(float(r.g), 1) if r.g else None,
-            metrics=round(float(r.m), 1) if r.m else None,
-            logs=round(float(r.l), 1) if r.l else None,
-            traces=round(float(r.t), 1) if r.t else None,
+            global_score=round(float(r.avg_global), 1) if r.avg_global is not None else None,
+            metrics=round(float(r.avg_metrics), 1) if r.avg_metrics is not None else None,
+            logs=round(float(r.avg_logs), 1) if r.avg_logs is not None else None,
+            traces=round(float(r.avg_traces), 1) if r.avg_traces is not None else None,
         )
         for r in rows
     ]
