@@ -116,7 +116,55 @@ class CostImpactData(BaseModel):
     top_findings: list[dict] = []
 
 
+class AvailableTagKey(BaseModel):
+    key: str
+    count: int
+
+
 # ── Endpoints ───────────────────────────────────────────────────────────
+
+@router.get("/available-tag-keys", response_model=list[AvailableTagKey])
+async def available_tag_keys(
+    current: CurrentUser,
+    period: str = Query("90d"),
+) -> list[AvailableTagKey]:
+    """
+    Returns the distinct user-defined tag keys present in analysis_tags for
+    completed analyses in the given period, ordered by frequency.
+    System-generated keys (trigger, branch, type, pr, lang) are excluded.
+    """
+    _, tenant_id, _ = current
+    tid = uuid.UUID(tenant_id)
+    start, end, _, _ = _period_range(period)
+
+    _SYSTEM_KEYS = {"trigger", "branch", "type", "pr", "lang"}
+
+    async with get_session_with_tenant(tenant_id) as session:
+        q = (
+            select(
+                AnalysisTag.key,
+                func.count(AnalysisTag.id).label("cnt"),
+            )
+            .select_from(AnalysisTag)
+            .join(AnalysisJob, AnalysisJob.id == AnalysisTag.job_id)
+            .where(
+                AnalysisTag.tenant_id == tid,
+                AnalysisTag.source != "system",
+                AnalysisJob.status == "completed",
+                AnalysisJob.completed_at >= start,
+                AnalysisJob.completed_at <= end,
+            )
+            .group_by(AnalysisTag.key)
+            .order_by(func.count(AnalysisTag.id).desc())
+        )
+        rows = (await session.execute(q)).all()
+
+    return [
+        AvailableTagKey(key=r.key, count=r.cnt)
+        for r in rows
+        if r.key not in _SYSTEM_KEYS
+    ]
+
 
 @router.get("/overview", response_model=OverviewKPI)
 async def analytics_overview(
