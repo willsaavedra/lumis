@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.core.database import get_session_with_tenant
 from apps.api.core.deps import CurrentUser, TenantAdmin
 from apps.api.models.tag_system import AnalysisTag, RepoTag, TagDefinition
-from apps.api.services.tag_service import TagInput, validate_and_warn
+from apps.api.services.tag_service import TagInput, seed_default_tag_definitions, validate_and_warn
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
@@ -90,6 +90,12 @@ async def list_definitions(current: CurrentUser) -> list[TagDefinitionOut]:
     _, tenant_id, _ = current
     tid = uuid.UUID(tenant_id)
     async with get_session_with_tenant(tenant_id) as session:
+        existing_n = (
+            await session.execute(select(func.count()).select_from(TagDefinition).where(TagDefinition.tenant_id == tid))
+        ).scalar_one()
+        if existing_n == 0:
+            await seed_default_tag_definitions(session, tid)
+
         repo_count_sub = (
             select(func.count(RepoTag.id))
             .where(RepoTag.tenant_id == tid, RepoTag.key == TagDefinition.key)
