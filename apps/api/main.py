@@ -8,6 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from apps.api.core.config import settings
 from apps.api.core.logging import configure_logging
 from apps.api.routers import auth, repositories, analyses, billing, connections, webhooks, stripe_webhooks, tenant, team
+from apps.api.routers import teams as teams_router
+from apps.api.routers import tags as tags_router
+from apps.api.routers import reports as reports_router
 from apps.api.routers.vendors import router as vendors_router
 from apps.api.routers.rag import router as rag_router
 
@@ -44,6 +47,9 @@ def create_app() -> FastAPI:
     app.include_router(billing.router, prefix="/api/v1/billing", tags=["billing"])
     app.include_router(tenant.router, prefix="/api/v1/tenant", tags=["tenant"])
     app.include_router(team.router, prefix="/api/v1/team", tags=["team"])
+    app.include_router(teams_router.router, prefix="/api/v1/teams", tags=["teams"])
+    app.include_router(tags_router.router, prefix="/api/v1/tags", tags=["tags"])
+    app.include_router(reports_router.router, prefix="/api/v1/reports", tags=["reports"])
     app.include_router(vendors_router, prefix="/api/v1/vendors", tags=["vendors"])
     app.include_router(rag_router)
 

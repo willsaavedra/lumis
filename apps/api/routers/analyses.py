@@ -19,7 +19,9 @@ from apps.api.core.database import get_session_with_tenant
 from apps.api.core.deps import CurrentUser
 from apps.api.models.analysis import AnalysisJob, AnalysisResult, Finding, FindingFeedback, FEEDBACK_SIGNALS, FEEDBACK_TARGETS
 from apps.api.models.scm import Repository
+from apps.api.models.teams import RepositoryTag, Tag
 from apps.api.scm.repo_web_url import repo_web_url as build_repo_web_url
+from apps.api.services.tag_access import assert_repo_accessible, effective_tag_ids_for_user, repository_visible_predicate
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
@@ -203,9 +205,23 @@ _SORTABLE = frozenset(
 @router.post("/estimate", response_model=EstimateResponse)
 async def estimate_analysis(body: EstimateRequest, current: CurrentUser) -> EstimateResponse:
     """Return a lightweight cost estimate without starting an analysis."""
-    user, tenant_id, _ = current
+    user, tenant_id, membership_role = current
     from apps.api.services.analysis_service import estimate_analysis_cost
+
+    try:
+        rid = uuid.UUID(body.repo_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid repo_id.") from e
     async with get_session_with_tenant(tenant_id) as session:
+        ok = await assert_repo_accessible(
+            session,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            membership_role=membership_role,
+            repo_id=rid,
+        )
+        if not ok:
+            raise HTTPException(status_code=404, detail="Repository not found.")
         result = await estimate_analysis_cost(
             session,
             tenant_id,
@@ -221,9 +237,23 @@ async def estimate_analysis(body: EstimateRequest, current: CurrentUser) -> Esti
 
 @router.post("", response_model=AnalysisJobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def trigger_analysis(body: TriggerAnalysisRequest, current: CurrentUser) -> AnalysisJobResponse:
-    user, tenant_id, _ = current
+    user, tenant_id, membership_role = current
     from apps.api.services.analysis_service import enqueue_manual_analysis
+
+    try:
+        rid = uuid.UUID(body.repo_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid repo_id.") from e
     async with get_session_with_tenant(tenant_id) as session:
+        ok = await assert_repo_accessible(
+            session,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            membership_role=membership_role,
+            repo_id=rid,
+        )
+        if not ok:
+            raise HTTPException(status_code=404, detail="Repository not found.")
         job = await enqueue_manual_analysis(
             session,
             tenant_id,
@@ -418,8 +448,10 @@ async def list_analyses(
     repo_id: str | None = Query(None),
     q: str | None = Query(None, max_length=200),
     fix_pr: str | None = Query(None),
+    tag_key: str | None = Query(None),
+    tag_value: str | None = Query(None),
 ) -> AnalysisListResponse:
-    user, tenant_id, _ = current
+    user, tenant_id, membership_role = current
     if sort not in _SORTABLE:
         sort = "created_at"
     if fix_pr is not None and fix_pr not in ("has_pr", "generating", "can_suggest"):
@@ -436,6 +468,34 @@ async def list_analyses(
     )
     if sort == "repo":
         need_repo_join = True
+
+    tid = uuid.UUID(tenant_id)
+    async with get_session_with_tenant(tenant_id) as session:
+        eff = await effective_tag_ids_for_user(
+            session,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            membership_role=membership_role,
+        )
+        vis_pred = repository_visible_predicate(eff)
+        if vis_pred is not None:
+            conditions.append(vis_pred)
+            need_repo_join = True
+        if tag_key and tag_value and tag_key.strip() and tag_value.strip():
+            conditions.append(
+                exists(
+                    select(1)
+                    .select_from(RepositoryTag)
+                    .join(Tag, Tag.id == RepositoryTag.tag_id)
+                    .where(
+                        RepositoryTag.repository_id == Repository.id,
+                        Tag.tenant_id == tid,
+                        Tag.key == tag_key.strip(),
+                        Tag.value == tag_value.strip(),
+                    )
+                )
+            )
+            need_repo_join = True
 
     def _base_select_from():
         f = select(AnalysisJob).where(*conditions)
@@ -481,7 +541,7 @@ async def list_analyses(
 
 @router.get("/{job_id}", response_model=AnalysisJobResponse)
 async def get_analysis(job_id: str, current: CurrentUser) -> AnalysisJobResponse:
-    user, tenant_id, _ = current
+    user, tenant_id, membership_role = current
     async with get_session_with_tenant(tenant_id) as session:
         result = await session.execute(
             select(AnalysisJob)
@@ -492,8 +552,17 @@ async def get_analysis(job_id: str, current: CurrentUser) -> AnalysisJobResponse
             )
         )
         job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail="Analysis not found.")
+        if not job:
+            raise HTTPException(status_code=404, detail="Analysis not found.")
+        ok = await assert_repo_accessible(
+            session,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            membership_role=membership_role,
+            repo_id=job.repo_id,
+        )
+        if not ok:
+            raise HTTPException(status_code=404, detail="Analysis not found.")
     return _job_to_response(job)
 
 

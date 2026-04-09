@@ -5,18 +5,31 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel
-from sqlalchemy import func, select
+from pydantic import BaseModel, Field
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import selectinload
 
 from apps.api.core.database import get_session_with_tenant
-from apps.api.core.deps import CurrentUser
+from apps.api.core.deps import CurrentUser, TenantAdmin
 from apps.api.models.analysis import AnalysisJob
 from apps.api.models.scm import Repository
+from apps.api.models.teams import RepositoryTag, Tag
 from apps.api.scm.repo_web_url import repo_web_url
+from apps.api.services.repo_tags import resolve_and_replace_repository_tags
+from apps.api.services.tag_access import (
+    assert_repo_accessible,
+    load_tags_for_repositories,
+    repository_visible_predicate,
+    effective_tag_ids_for_user,
+)
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
+
+
+class TagOut(BaseModel):
+    key: str
+    value: str
 
 
 class RepoResponse(BaseModel):
@@ -38,6 +51,7 @@ class RepoResponse(BaseModel):
     obs_metadata: dict | None = None
     context_summary: str | None = None
     last_analysis_at: str | None = None
+    tags: list[TagOut] = Field(default_factory=list)
 
 
 class ActivateRepoRequest(BaseModel):
@@ -53,29 +67,65 @@ class ActivateRepoRequest(BaseModel):
     observability_backend: str | None = None
     instrumentation: str | None = None
     obs_metadata: dict | None = None
+    team_id: str | None = Field(None, description="Platform team — applies default tag for that team.")
+    tag_ids: list[str] | None = Field(None, description="Explicit tag UUIDs; use [] to clear when updating tags.")
 
 
 @router.get("", response_model=list[RepoResponse])
-async def list_repositories(current: CurrentUser) -> list[RepoResponse]:
-    user, tenant_id, _ = current
+async def list_repositories(
+    current: CurrentUser,
+    tag_key: str | None = Query(None),
+    tag_value: str | None = Query(None),
+) -> list[RepoResponse]:
+    user, tenant_id, membership_role = current
+    tid = uuid.UUID(tenant_id)
     async with get_session_with_tenant(tenant_id) as session:
+        eff = await effective_tag_ids_for_user(
+            session,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            membership_role=membership_role,
+        )
+        pred = repository_visible_predicate(eff)
         last_completed_at = (
             select(func.max(AnalysisJob.completed_at))
             .where(
-                AnalysisJob.tenant_id == uuid.UUID(tenant_id),
+                AnalysisJob.tenant_id == tid,
                 AnalysisJob.repo_id == Repository.id,
                 AnalysisJob.status == "completed",
             )
             .correlate(Repository)
             .scalar_subquery()
         )
-        result = await session.execute(
+        q = (
             select(Repository, last_completed_at.label("last_analysis_at"))
-            .where(Repository.tenant_id == uuid.UUID(tenant_id), Repository.is_active == True)
+            .where(Repository.tenant_id == tid, Repository.is_active == True)
             .options(selectinload(Repository.connection))
         )
+        if pred is not None:
+            q = q.where(pred)
+        if tag_key and tag_value and tag_key.strip() and tag_value.strip():
+            q = q.where(
+                exists(
+                    select(1)
+                    .select_from(RepositoryTag)
+                    .join(Tag, Tag.id == RepositoryTag.tag_id)
+                    .where(
+                        RepositoryTag.repository_id == Repository.id,
+                        Tag.tenant_id == tid,
+                        Tag.key == tag_key.strip(),
+                        Tag.value == tag_value.strip(),
+                    )
+                )
+            )
+        result = await session.execute(q)
         rows = result.all()
-    return [_repo_to_response(repo, last_analysis_at) for (repo, last_analysis_at) in rows]
+        repo_ids = [r[0].id for r in rows]
+        tag_map = await load_tags_for_repositories(session, tenant_id, repo_ids)
+    return [
+        _repo_to_response(repo, last_analysis_at, tags=tag_map.get(repo.id, []))
+        for (repo, last_analysis_at) in rows
+    ]
 
 
 @router.get("/available")
@@ -127,7 +177,7 @@ async def list_available_repositories(current: CurrentUser) -> list[dict]:
 @router.get("/{repo_id}", response_model=RepoResponse)
 async def get_repository(repo_id: str, current: CurrentUser) -> RepoResponse:
     """Return a single active repository with last completed analysis timestamp."""
-    user, tenant_id, _ = current
+    user, tenant_id, membership_role = current
     try:
         rid = uuid.UUID(repo_id)
     except ValueError as e:
@@ -145,18 +195,30 @@ async def get_repository(repo_id: str, current: CurrentUser) -> RepoResponse:
         repo = result.scalar_one_or_none()
         if not repo:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found.")
+        ok = await assert_repo_accessible(
+            session,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            membership_role=membership_role,
+            repo_id=rid,
+        )
+        if not ok:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found.")
         last_at = await _get_last_analysis_at(session, tenant_id, rid)
-    return _repo_to_response(repo, last_at)
+        tag_map = await load_tags_for_repositories(session, tenant_id, [rid])
+    return _repo_to_response(repo, last_at, tags=tag_map.get(rid, []))
 
 
 @router.post("", response_model=RepoResponse, status_code=status.HTTP_201_CREATED)
 async def activate_repository(body: ActivateRepoRequest, current: CurrentUser) -> RepoResponse:
-    user, tenant_id, _ = current
+    user, tenant_id, membership_role = current
     from apps.api.models.scm import ScmConnection
+
+    tid = uuid.UUID(tenant_id)
     async with get_session_with_tenant(tenant_id) as session:
         conn_result = await session.execute(
             select(ScmConnection).where(
-                ScmConnection.tenant_id == uuid.UUID(tenant_id),
+                ScmConnection.tenant_id == tid,
                 ScmConnection.scm_type == body.scm_type,
             )
         )
@@ -169,14 +231,15 @@ async def activate_repository(body: ActivateRepoRequest, current: CurrentUser) -
 
         existing = await session.execute(
             select(Repository).where(
-                Repository.tenant_id == uuid.UUID(tenant_id),
+                Repository.tenant_id == tid,
                 Repository.scm_repo_id == body.scm_repo_id,
             )
         )
         repo = existing.scalar_one_or_none()
+        is_new = repo is None
         if not repo:
             repo = Repository(
-                tenant_id=uuid.UUID(tenant_id),
+                tenant_id=tid,
                 scm_repo_id=body.scm_repo_id,
                 full_name=body.full_name,
                 default_branch=body.default_branch,
@@ -211,6 +274,16 @@ async def activate_repository(body: ActivateRepoRequest, current: CurrentUser) -
             if body.obs_metadata is not None:
                 repo.obs_metadata = body.obs_metadata
         await session.flush()
+        await resolve_and_replace_repository_tags(
+            session,
+            tenant_id=tid,
+            repo_id=repo.id,
+            user=user,
+            membership_role=membership_role,
+            team_id=body.team_id,
+            tag_ids=body.tag_ids,
+            is_new_repo=is_new,
+        )
         refreshed = await session.execute(
             select(Repository)
             .where(Repository.id == repo.id)
@@ -218,20 +291,34 @@ async def activate_repository(body: ActivateRepoRequest, current: CurrentUser) -
         )
         repo = refreshed.scalar_one()
         last_analysis_at = await _get_last_analysis_at(session, tenant_id, repo.id)
-    return _repo_to_response(repo, last_analysis_at)
+        tag_map = await load_tags_for_repositories(session, tenant_id, [repo.id])
+    return _repo_to_response(repo, last_analysis_at, tags=tag_map.get(repo.id, []))
 
 
 @router.post("/{repo_id}/activate", response_model=RepoResponse)
 async def activate_repo(repo_id: str, current: CurrentUser) -> RepoResponse:
-    user, tenant_id, _ = current
+    user, tenant_id, membership_role = current
+    try:
+        rid = uuid.UUID(repo_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid repo_id.") from e
     async with get_session_with_tenant(tenant_id) as session:
         result = await session.execute(
             select(Repository)
-            .where(Repository.id == uuid.UUID(repo_id))
+            .where(Repository.id == rid)
             .options(selectinload(Repository.connection))
         )
         repo = result.scalar_one_or_none()
         if not repo:
+            raise HTTPException(status_code=404, detail="Repository not found.")
+        ok = await assert_repo_accessible(
+            session,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            membership_role=membership_role,
+            repo_id=rid,
+        )
+        if not ok:
             raise HTTPException(status_code=404, detail="Repository not found.")
         repo.is_active = True
         await session.flush()
@@ -242,20 +329,34 @@ async def activate_repo(repo_id: str, current: CurrentUser) -> RepoResponse:
         )
         repo = refreshed.scalar_one()
         last_analysis_at = await _get_last_analysis_at(session, tenant_id, repo.id)
-    return _repo_to_response(repo, last_analysis_at)
+        tag_map = await load_tags_for_repositories(session, tenant_id, [repo.id])
+    return _repo_to_response(repo, last_analysis_at, tags=tag_map.get(repo.id, []))
 
 
 @router.post("/{repo_id}/deactivate", response_model=RepoResponse)
 async def deactivate_repo(repo_id: str, current: CurrentUser) -> RepoResponse:
-    user, tenant_id, _ = current
+    user, tenant_id, membership_role = current
+    try:
+        rid = uuid.UUID(repo_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid repo_id.") from e
     async with get_session_with_tenant(tenant_id) as session:
         result = await session.execute(
             select(Repository)
-            .where(Repository.id == uuid.UUID(repo_id))
+            .where(Repository.id == rid)
             .options(selectinload(Repository.connection))
         )
         repo = result.scalar_one_or_none()
         if not repo:
+            raise HTTPException(status_code=404, detail="Repository not found.")
+        ok = await assert_repo_accessible(
+            session,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            membership_role=membership_role,
+            repo_id=rid,
+        )
+        if not ok:
             raise HTTPException(status_code=404, detail="Repository not found.")
         repo.is_active = False
         await session.flush()
@@ -266,7 +367,8 @@ async def deactivate_repo(repo_id: str, current: CurrentUser) -> RepoResponse:
         )
         repo = refreshed.scalar_one()
         last_analysis_at = await _get_last_analysis_at(session, tenant_id, repo.id)
-    return _repo_to_response(repo, last_analysis_at)
+        tag_map = await load_tags_for_repositories(session, tenant_id, [repo.id])
+    return _repo_to_response(repo, last_analysis_at, tags=tag_map.get(repo.id, []))
 
 
 class UpdateRepoContextRequest(BaseModel):
@@ -282,18 +384,31 @@ class UpdateRepoContextRequest(BaseModel):
 
 @router.patch("/{repo_id}/context", response_model=RepoResponse)
 async def update_repo_context(repo_id: str, body: UpdateRepoContextRequest, current: CurrentUser) -> RepoResponse:
-    user, tenant_id, _ = current
+    user, tenant_id, membership_role = current
+    try:
+        rid = uuid.UUID(repo_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid repo_id.") from e
     async with get_session_with_tenant(tenant_id) as session:
         result = await session.execute(
             select(Repository)
             .where(
-                Repository.id == uuid.UUID(repo_id),
+                Repository.id == rid,
                 Repository.tenant_id == uuid.UUID(tenant_id),
             )
             .options(selectinload(Repository.connection))
         )
         repo = result.scalar_one_or_none()
         if not repo:
+            raise HTTPException(status_code=404, detail="Repository not found.")
+        ok = await assert_repo_accessible(
+            session,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            membership_role=membership_role,
+            repo_id=rid,
+        )
+        if not ok:
             raise HTTPException(status_code=404, detail="Repository not found.")
         if body.repo_type is not None:
             repo.repo_type = body.repo_type
@@ -319,7 +434,8 @@ async def update_repo_context(repo_id: str, body: UpdateRepoContextRequest, curr
         )
         repo = refreshed.scalar_one()
         last_analysis_at = await _get_last_analysis_at(session, tenant_id, repo.id)
-    return _repo_to_response(repo, last_analysis_at)
+        tag_map = await load_tags_for_repositories(session, tenant_id, [repo.id])
+    return _repo_to_response(repo, last_analysis_at, tags=tag_map.get(rid, []))
 
 
 @router.post("/{repo_id}/scan-context", status_code=202)
@@ -432,7 +548,43 @@ async def list_repo_contents(
         ) from e
 
 
-def _repo_to_response(repo: Repository, last_analysis_at=None) -> RepoResponse:
+class UpdateRepoTagsRequest(BaseModel):
+    tag_ids: list[str] = Field(default_factory=list, description="Replace all tags on this repository.")
+
+
+@router.patch("/{repo_id}/tags", response_model=RepoResponse)
+async def update_repository_tags(repo_id: str, body: UpdateRepoTagsRequest, current: TenantAdmin) -> RepoResponse:
+    """Replace repository tags (tenant admin)."""
+    user, tenant_id, membership_role = current
+    try:
+        rid = uuid.UUID(repo_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid repo_id.") from e
+    tid = uuid.UUID(tenant_id)
+    async with get_session_with_tenant(tenant_id) as session:
+        r = await session.execute(
+            select(Repository).where(Repository.tenant_id == tid, Repository.id == rid, Repository.is_active == True)
+        )
+        repo = r.scalar_one_or_none()
+        if not repo:
+            raise HTTPException(status_code=404, detail="Repository not found.")
+        await resolve_and_replace_repository_tags(
+            session,
+            tenant_id=tid,
+            repo_id=rid,
+            user=user,
+            membership_role=membership_role,
+            team_id=None,
+            tag_ids=body.tag_ids,
+            is_new_repo=False,
+        )
+        await session.refresh(repo, attribute_names=["connection"])
+        last_at = await _get_last_analysis_at(session, tenant_id, rid)
+        tag_map = await load_tags_for_repositories(session, tenant_id, [rid])
+    return _repo_to_response(repo, last_at, tags=tag_map.get(rid, []))
+
+
+def _repo_to_response(repo: Repository, last_analysis_at=None, tags: list | None = None) -> RepoResponse:
     scm_type = "github"
     try:
         if repo.connection is not None and repo.connection.scm_type:
@@ -445,6 +597,7 @@ def _repo_to_response(repo: Repository, last_analysis_at=None) -> RepoResponse:
             last_iso = last_analysis_at.isoformat()
     except Exception:
         pass
+    tag_list = [TagOut(key=t["key"], value=t["value"]) for t in (tags or [])]
     return RepoResponse(
         id=str(repo.id),
         full_name=repo.full_name,
@@ -468,6 +621,7 @@ def _repo_to_response(repo: Repository, last_analysis_at=None) -> RepoResponse:
         obs_metadata=getattr(repo, "obs_metadata", None),
         context_summary=getattr(repo, "context_summary", None),
         last_analysis_at=last_iso,
+        tags=tag_list,
     )
 
 
