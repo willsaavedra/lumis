@@ -111,7 +111,10 @@ async def snapshot_tags_for_job(
     tid = uuid.UUID(tenant_id)
 
     repo_tags_result = await session.execute(
-        select(RepoTag.key, RepoTag.value, RepoTag.source).where(RepoTag.repo_id == repo_id)
+        select(RepoTag.key, RepoTag.value, RepoTag.source).where(
+            RepoTag.repo_id == repo_id,
+            RepoTag.tenant_id == tid,  # explicit filter — don't rely on RLS context alone
+        )
     )
 
     rows: list[dict] = []
