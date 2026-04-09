@@ -4,12 +4,12 @@ from __future__ import annotations
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 
 from apps.api.core.config import settings
-from apps.api.core.deps import CurrentUser
+from apps.api.core.deps import CurrentUser, TenantAdmin
 from apps.api.core.security import create_state_token, decode_state_token
 
 log = structlog.get_logger(__name__)
@@ -40,6 +40,33 @@ async def list_connections(current: CurrentUser) -> list[dict]:
         }
         for c in connections
     ]
+
+
+@router.delete("/{connection_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+async def delete_connection(connection_id: str, current: TenantAdmin) -> None:
+    """Remove an SCM connection for this tenant. Repositories keep their rows; scm_connection_id is set to NULL."""
+    _user, tenant_id, _ = current
+    try:
+        cid = uuid.UUID(connection_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid connection id.") from e
+
+    from apps.api.core.database import get_session_with_tenant
+    from apps.api.models.scm import ScmConnection
+
+    async with get_session_with_tenant(tenant_id) as session:
+        result = await session.execute(
+            select(ScmConnection).where(
+                ScmConnection.id == cid,
+                ScmConnection.tenant_id == uuid.UUID(tenant_id),
+            )
+        )
+        conn = result.scalar_one_or_none()
+        if not conn:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found.")
+        await session.delete(conn)
+
+    log.info("scm_connection_deleted", connection_id=connection_id, tenant_id=tenant_id)
 
 
 @router.get("/github")
