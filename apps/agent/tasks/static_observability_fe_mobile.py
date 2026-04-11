@@ -4,6 +4,11 @@ Curated static RAG chunks: observability for browsers, SPAs, and mobile clients.
 Complements backend/IaC-heavy _STATIC_KNOWLEDGE in ingest_global_docs.
 """
 
+from opentelemetry import trace
+
+# Initialize tracer for this module
+tracer = trace.get_tracer(__name__)
+
 # (source_id, pillar, markdown_content)
 STATIC_OBSERVABILITY_FE_MOBILE: list[tuple[str, str, str]] = [
     (
@@ -84,3 +89,10 @@ FE_MOBILE_DOC_URLS: list[tuple[str, str | None, str]] = [
     ),
     ("https://web.dev/vitals/", None, "metrics"),
 ]
+
+def get_observability_knowledge():
+    """Retrieve static observability knowledge with tracing."""
+    with tracer.start_as_current_span("fetch_observability_knowledge") as span:
+        span.set_attribute("knowledge.type", "fe_mobile")
+        span.set_attribute("knowledge.chunks_count", len(STATIC_OBSERVABILITY_FE_MOBILE))
+        return STATIC_OBSERVABILITY_FE_MOBILE
