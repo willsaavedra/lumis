@@ -18,7 +18,7 @@ CREATE TYPE scm_type_enum AS ENUM ('github', 'gitlab', 'bitbucket', 'azure_devop
 CREATE TYPE job_status_enum AS ENUM ('pending', 'running', 'completed', 'failed');
 CREATE TYPE trigger_enum AS ENUM ('pr', 'push', 'manual', 'scheduled');
 CREATE TYPE analysis_type_enum AS ENUM ('quick', 'full', 'repository', 'context');
-CREATE TYPE pillar_enum AS ENUM ('metrics', 'logs', 'traces', 'iac', 'pipeline');
+CREATE TYPE pillar_enum AS ENUM ('metrics', 'logs', 'traces', 'iac', 'pipeline', 'compliance', 'cost', 'snr');
 CREATE TYPE severity_enum AS ENUM ('critical', 'warning', 'info');
 CREATE TYPE dimension_enum AS ENUM ('cost', 'snr', 'pipeline', 'compliance', 'coverage');
 CREATE TYPE billing_event_type_enum AS ENUM (

@@ -104,7 +104,7 @@ class TriggerAnalysisRequest(BaseModel):
     )
     scope_type: Literal["full_repo", "selection"] | None = None
     selected_paths: list[str] = Field(default_factory=list)
-    llm_provider: Literal["anthropic", "cerebra_ai"] = "cerebra_ai"
+    llm_provider: Literal["anthropic", "cerebra_ai"] = "anthropic"
     changed_files: list[str] | None = Field(
         default=None,
         description="Paths relative to repo root (files or dirs). Required for quick; optional for full/repository.",
@@ -115,7 +115,7 @@ class EstimateRequest(BaseModel):
     repo_id: str
     scope_type: Literal["full_repo", "selection"] = "full_repo"
     selected_paths: list[str] = Field(default_factory=list)
-    llm_provider: Literal["anthropic", "cerebra_ai"] = "cerebra_ai"
+    llm_provider: Literal["anthropic", "cerebra_ai"] = "anthropic"
     paths: list[str] | None = Field(default=None, description="Legacy: selected file/folder paths.")
     select_all: bool = False
     ref: str = "main"
