@@ -40,7 +40,7 @@ shell-api:
 	docker compose exec api bash
 
 shell-db:
-	docker compose exec postgres psql -U sre -d lumis
+	docker compose exec postgres psql -U sre -d horion
 
 # ── Database ─────────────────────────────────────────────────────────────────
 

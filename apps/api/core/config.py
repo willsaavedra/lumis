@@ -109,7 +109,7 @@ class Settings(BaseSettings):
     stripe_price_scale_base: str = ""
     stripe_price_scale_overage: str = ""
 
-    # Slack
+    # Slack — optional global URL for internal/ops use only; per-team webhooks live in `teams.slack_webhook_encrypted` (Settings).
     slack_webhook_url: str = ""
 
     # Plan credit limits

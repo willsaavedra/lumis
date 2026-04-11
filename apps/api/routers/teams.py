@@ -14,6 +14,12 @@ from apps.api.core.database import get_session_with_tenant
 from apps.api.core.deps import CurrentUser, TenantAdmin
 from apps.api.models.auth import User
 from apps.api.models.teams import Tag, Team, TeamMembership
+from apps.api.services.analysis_notifications import (
+    encrypt_webhook_url,
+    send_test_notification,
+    webhook_url_hint,
+)
+from apps.api.core.security import decrypt_scm_token
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
@@ -53,6 +59,26 @@ class AddTeamMembersRequest(BaseModel):
 class TeamMemberRow(BaseModel):
     user_id: str
     email: str
+
+
+class TeamNotificationsResponse(BaseModel):
+    slack_configured: bool
+    teams_configured: bool
+    slack_url_hint: str | None
+    teams_url_hint: str | None
+    notify_on_analysis_complete: bool
+
+
+class PatchTeamNotificationsBody(BaseModel):
+    """Omit a field to leave it unchanged. Send empty string to clear a webhook URL."""
+
+    slack_webhook_url: str | None = None
+    msteams_webhook_url: str | None = None
+    notify_on_analysis_complete: bool | None = None
+
+
+class TestNotificationBody(BaseModel):
+    channel: str = Field("both", description="slack | teams | both")
 
 
 def _team_to_response(team: Team) -> TeamResponse:
@@ -109,6 +135,100 @@ async def create_team(body: CreateTeamRequest, current: TenantAdmin) -> TeamResp
         out = _team_to_response(team)
     log.info("team_created", team_id=out.id, tenant_id=tenant_id, slug=slug)
     return out
+
+
+def _notifications_response(team: Team) -> TeamNotificationsResponse:
+    slack_plain = decrypt_scm_token(team.slack_webhook_encrypted)
+    teams_plain = decrypt_scm_token(team.msteams_webhook_encrypted)
+    return TeamNotificationsResponse(
+        slack_configured=bool(slack_plain),
+        teams_configured=bool(teams_plain),
+        slack_url_hint=webhook_url_hint(slack_plain),
+        teams_url_hint=webhook_url_hint(teams_plain),
+        notify_on_analysis_complete=bool(team.notify_on_analysis_complete),
+    )
+
+
+@router.get("/{team_id}/notifications", response_model=TeamNotificationsResponse)
+async def get_team_notifications(team_id: str, current: TenantAdmin) -> TeamNotificationsResponse:
+    _admin, tenant_id, _ = current
+    try:
+        tid = uuid.UUID(team_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid team_id.") from e
+    async with get_session_with_tenant(tenant_id) as session:
+        r = await session.execute(select(Team).where(Team.id == tid, Team.tenant_id == uuid.UUID(tenant_id)))
+        team = r.scalar_one_or_none()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found.")
+    return _notifications_response(team)
+
+
+@router.patch("/{team_id}/notifications", response_model=TeamNotificationsResponse)
+async def patch_team_notifications(
+    team_id: str, body: PatchTeamNotificationsBody, current: TenantAdmin
+) -> TeamNotificationsResponse:
+    _admin, tenant_id, _ = current
+    try:
+        tid = uuid.UUID(team_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid team_id.") from e
+    data = body.model_dump(exclude_unset=True)
+    async with get_session_with_tenant(tenant_id) as session:
+        r = await session.execute(select(Team).where(Team.id == tid, Team.tenant_id == uuid.UUID(tenant_id)))
+        team = r.scalar_one_or_none()
+        if not team:
+            raise HTTPException(status_code=404, detail="Team not found.")
+        if "slack_webhook_url" in data:
+            raw = data["slack_webhook_url"]
+            team.slack_webhook_encrypted = None if raw is None or str(raw).strip() == "" else encrypt_webhook_url(str(raw))
+        if "msteams_webhook_url" in data:
+            raw = data["msteams_webhook_url"]
+            team.msteams_webhook_encrypted = None if raw is None or str(raw).strip() == "" else encrypt_webhook_url(str(raw))
+        if "notify_on_analysis_complete" in data and data["notify_on_analysis_complete"] is not None:
+            team.notify_on_analysis_complete = bool(data["notify_on_analysis_complete"])
+        await session.flush()
+        out = _notifications_response(team)
+    log.info("team_notifications_updated", team_id=team_id, tenant_id=tenant_id)
+    return out
+
+
+@router.post("/{team_id}/notifications/test", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+async def post_team_notifications_test(
+    team_id: str, body: TestNotificationBody, current: TenantAdmin
+) -> None:
+    _admin, tenant_id, _ = current
+    try:
+        tid = uuid.UUID(team_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid team_id.") from e
+    ch = body.channel.strip().lower()
+    if ch not in ("slack", "teams", "both"):
+        raise HTTPException(status_code=400, detail="channel must be slack, teams, or both.")
+    slack_enc: bytes | None = None
+    teams_enc: bytes | None = None
+    async with get_session_with_tenant(tenant_id) as session:
+        r = await session.execute(select(Team).where(Team.id == tid, Team.tenant_id == uuid.UUID(tenant_id)))
+        team = r.scalar_one_or_none()
+        if not team:
+            raise HTTPException(status_code=404, detail="Team not found.")
+        slack_enc = team.slack_webhook_encrypted
+        teams_enc = team.msteams_webhook_encrypted
+        slack_ok = bool(decrypt_scm_token(slack_enc))
+        teams_ok = bool(decrypt_scm_token(teams_enc))
+    if ch in ("slack", "both") and not slack_ok:
+        raise HTTPException(status_code=400, detail="Slack webhook is not configured for this team.")
+    if ch in ("teams", "both") and not teams_ok:
+        raise HTTPException(status_code=400, detail="Microsoft Teams webhook is not configured for this team.")
+    try:
+        await send_test_notification(
+            slack_webhook_encrypted=slack_enc,
+            msteams_webhook_encrypted=teams_enc,
+            channel=ch,
+        )
+    except Exception as e:
+        log.warning("team_notification_test_failed", team_id=team_id, error=str(e))
+        raise HTTPException(status_code=502, detail=f"Webhook request failed: {e!s}") from e
 
 
 @router.get("/{team_id}/members", response_model=list[TeamMemberRow])

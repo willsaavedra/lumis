@@ -109,13 +109,31 @@ async def post_report_node(state: AgentState) -> dict:
     if cost_breakdown:
         exec_summary["cost_breakdown"] = cost_breakdown
 
+    save_ok = False
     try:
         await _save_to_db(
             job_id, tenant_id, findings, scores, token_usage,
             previous_job_id, crossrun_summary, cost_breakdown=cost_breakdown,
         )
+        save_ok = True
     except Exception as e:
         log.error("save_to_db_failed", job_id=job_id, error=str(e))
+
+    if save_ok:
+        try:
+            req = state.get("request") or {}
+            repo_id = req.get("repo_id")
+            if repo_id:
+                from apps.api.services.analysis_notifications import notify_analysis_completed
+
+                await notify_analysis_completed(
+                    job_id=job_id,
+                    tenant_id=tenant_id,
+                    repo_id=str(repo_id),
+                    exec_summary=exec_summary,
+                )
+        except Exception as e:
+            log.warning("analysis_notify_failed", job_id=job_id, error=str(e))
 
     try:
         repo_context = state.get("repo_context") or {}

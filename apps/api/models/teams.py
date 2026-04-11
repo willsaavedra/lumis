@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, LargeBinary, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,6 +32,11 @@ class Team(Base):
     slug: Mapped[str] = mapped_column(Text, nullable=False)
     default_tag_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tags.id", ondelete="RESTRICT"), nullable=False
+    )
+    slack_webhook_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    msteams_webhook_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    notify_on_analysis_complete: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true"), default=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
