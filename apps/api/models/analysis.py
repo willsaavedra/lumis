@@ -109,7 +109,7 @@ class Finding(Base):
     result_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("analysis_results.id", ondelete="CASCADE"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"))
     pillar: Mapped[str] = mapped_column(
-        Enum("metrics", "logs", "traces", "iac", "pipeline", name="pillar_enum"), nullable=False
+        Enum("metrics", "logs", "traces", "iac", "pipeline", "compliance", "cost", "snr", name="pillar_enum", create_type=False), nullable=False
     )
     severity: Mapped[str] = mapped_column(
         Enum("critical", "warning", "info", name="severity_enum"), nullable=False
