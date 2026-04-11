@@ -1,17 +1,28 @@
 """Parallel batch executor with rate limiting, retry, and batch splitting.
 
 Runs LLM analysis batches concurrently via asyncio.Semaphore, with automatic
-retry and batch-split-on-failure strategy.
+retry, batch-split-on-failure strategy, and connection-error circuit breaking.
 """
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Awaitable
 
 import structlog
 
 log = structlog.get_logger(__name__)
+
+_CONNECTION_ERROR_TYPES = (
+    "ConnectError", "ConnectTimeout", "TimeoutException",
+)
+
+
+def _is_connection_error(exc: Exception) -> bool:
+    """Detect errors indicating the LLM endpoint is unreachable."""
+    name = type(exc).__name__
+    return any(t in name for t in _CONNECTION_ERROR_TYPES)
 
 
 @dataclass
@@ -40,6 +51,7 @@ class BatchRunner:
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._max_retries = max_retries
         self._base_backoff = base_backoff
+        self._circuit_open = False
 
     async def run_all(
         self,
@@ -55,6 +67,14 @@ class BatchRunner:
 
         Returns a BatchResult for every batch (including failed ones).
         """
+        log.info(
+            "batch_run_start",
+            total_batches=len(batches),
+            max_concurrent=self._semaphore._value,
+            max_retries=self._max_retries,
+        )
+        t0 = time.monotonic()
+
         tasks = [
             self._run_one(i, batch, analyze_fn, on_complete)
             for i, batch in enumerate(batches)
@@ -73,6 +93,18 @@ class BatchRunner:
                 final.extend(r)
             else:
                 final.append(r)
+
+        elapsed = time.monotonic() - t0
+        ok = sum(1 for b in final if not b.error)
+        failed = sum(1 for b in final if b.error)
+        log.info(
+            "batch_run_complete",
+            total_batches=len(final),
+            succeeded=ok,
+            failed=failed,
+            elapsed_s=round(elapsed, 2),
+            circuit_open=self._circuit_open,
+        )
         return final
 
     async def _run_one(
@@ -83,6 +115,20 @@ class BatchRunner:
         on_complete: OnCompleteFn | None,
     ) -> BatchResult | list[BatchResult]:
         async with self._semaphore:
+            if self._circuit_open:
+                log.warning(
+                    "batch_skipped_circuit_open",
+                    batch_index=idx,
+                    files_in_batch=len(batch),
+                )
+                result = BatchResult(
+                    batch_index=idx,
+                    files=batch,
+                    error="LLM endpoint unreachable — circuit open, skipping remaining batches",
+                )
+                if on_complete:
+                    await on_complete(result)
+                return result
             return await self._run_with_retry(idx, batch, analyze_fn, on_complete)
 
     async def _run_with_retry(
@@ -112,15 +158,39 @@ class BatchRunner:
                 attempt=attempt + 1,
                 max_retries=self._max_retries,
                 files_in_batch=len(batch),
-                error=str(e),
+                error_type=type(e).__name__,
+                error=str(e)[:300],
             )
+
+            if _is_connection_error(e):
+                self._circuit_open = True
+                log.error(
+                    "batch_circuit_breaker_tripped",
+                    batch_index=idx,
+                    error_type=type(e).__name__,
+                    error=str(e)[:300],
+                )
+                result = BatchResult(
+                    batch_index=idx,
+                    files=batch,
+                    error=f"LLM endpoint unreachable: {e}",
+                    retries=attempt + 1,
+                )
+                if on_complete:
+                    await on_complete(result)
+                return result
 
             if attempt < self._max_retries - 1:
                 wait = self._base_backoff ** (attempt + 1)
+                log.info(
+                    "batch_retry_backoff",
+                    batch_index=idx,
+                    attempt=attempt + 1,
+                    wait_s=wait,
+                )
                 await asyncio.sleep(wait)
                 return await self._run_with_retry(idx, batch, analyze_fn, on_complete, attempt + 1)
 
-            # Max retries exhausted — try splitting the batch
             if len(batch) > 1:
                 log.info(
                     "batch_splitting",
@@ -139,7 +209,6 @@ class BatchRunner:
                         results.append(r)
                 return results
 
-            # Single-file batch that still fails
             result = BatchResult(
                 batch_index=idx,
                 files=batch,

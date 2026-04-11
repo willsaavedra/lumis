@@ -790,7 +790,22 @@ async def analyze_coverage_node(state: AgentState) -> dict:
             max_concurrent=settings.max_concurrent_batches,
             max_retries=3,
         )
-        await runner.run_all(all_batches, _analyze_batch, _on_batch_complete)
+        batch_results = await runner.run_all(all_batches, _analyze_batch, _on_batch_complete)
+
+        all_errored = all(br.error for br in batch_results) if batch_results else False
+        if all_errored and batch_results:
+            first_err = batch_results[0].error or "unknown"
+            log.error(
+                "all_batches_failed",
+                total_batches=len(batch_results),
+                first_error=first_err[:300],
+                job_id=state.get("job_id"),
+            )
+            await publish_progress(
+                state, "analyzing", 55,
+                f"LLM analysis failed for all batches: {first_err[:120]}",
+                stage_index=5,
+            )
 
         # Output validation: re-analyze files stuck in non-terminal state
         # (LLM output may have been truncated, omitting some files)
