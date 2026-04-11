@@ -296,17 +296,19 @@ async def patch_repo_tags(repo_id: str, body: PatchRepoTagsRequest, current: Ten
         return await get_repo_tags(repo_id, current)
 
     async with get_session_with_tenant(tenant_id) as session:
-        vr = await validate_and_warn(session, tenant_id, inputs)
+        # Load existing tags first so validation considers the full post-patch state.
+        existing_r = await session.execute(
+            select(RepoTag).where(RepoTag.repo_id == rid)
+        )
+        by_key = {rt.key: rt for rt in existing_r.scalars().all()}
+        existing_keys = set(by_key.keys())
+
+        vr = await validate_and_warn(session, tenant_id, inputs, existing_keys=existing_keys)
         if not vr.valid:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=[{"key": e.key, "message": e.message} for e in vr.errors],
             )
-
-        existing_r = await session.execute(
-            select(RepoTag).where(RepoTag.repo_id == rid)
-        )
-        by_key = {rt.key: rt for rt in existing_r.scalars().all()}
 
         for inp in inputs:
             if inp.key in by_key:

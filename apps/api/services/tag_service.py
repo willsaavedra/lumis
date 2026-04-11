@@ -44,9 +44,15 @@ async def validate_repo_tags(
     session: AsyncSession,
     tenant_id: str,
     tags: list[TagInput],
+    *,
+    existing_keys: set[str] | None = None,
 ) -> list[TagValidationError]:
     """
     Validate tags against tenant's tag_definitions.
+
+    - ``existing_keys``: keys already persisted on the repo (for PATCH operations).
+      Required-tag checks only fire when the key is absent from BOTH the new payload
+      AND the existing set.  Pass ``None`` (default) for full-replace (PUT) operations.
     Returns list of errors (empty = valid).
     """
     tid = uuid.UUID(tenant_id)
@@ -73,8 +79,9 @@ async def validate_repo_tags(
             )
 
     if tags:
+        satisfied_keys = provided_keys | (existing_keys or set())
         for key, defn in definitions.items():
-            if defn.required and key not in provided_keys:
+            if defn.required and key not in satisfied_keys:
                 issues.append(
                     TagValidationError(key=key, message=f"Required tag '{key}' is missing.", level="error")
                 )
@@ -86,9 +93,11 @@ async def validate_and_warn(
     session: AsyncSession,
     tenant_id: str,
     tags: list[TagInput],
+    *,
+    existing_keys: set[str] | None = None,
 ) -> TagValidationResult:
     """Validate and split into errors (block save) and warnings (informational)."""
-    issues = await validate_repo_tags(session, tenant_id, tags)
+    issues = await validate_repo_tags(session, tenant_id, tags, existing_keys=existing_keys)
     errors = [i for i in issues if i.level == "error"]
     warnings = [i for i in issues if i.level == "warning"]
     return TagValidationResult(valid=len(errors) == 0, errors=errors, warnings=warnings)
@@ -160,7 +169,7 @@ DEFAULT_TAG_DEFINITIONS = [
         "key": "env",
         "label": "Environment",
         "description": "Deployment environment",
-        "required": True,
+        "required": False,
         "allowed_values": ["production", "staging", "dev", "sandbox"],
         "color_class": "tag-env",
         "sort_order": 2,

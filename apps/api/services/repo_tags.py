@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from apps.api.models.auth import User
+from apps.api.models.tag_system import RepoTag
 from apps.api.models.teams import RepositoryTag, Tag, Team, TeamMembership
 
 
@@ -92,6 +93,7 @@ async def resolve_and_replace_repository_tags(
             raise HTTPException(status_code=400, detail="Invalid team_id.") from e
         tr = await session.execute(
             select(Team).where(Team.id == tmid, Team.tenant_id == tenant_id)
+            .options(selectinload(Team.default_tag_row))
         )
         team = tr.scalar_one_or_none()
         if not team:
@@ -101,10 +103,50 @@ async def resolve_and_replace_repository_tags(
                 raise HTTPException(status_code=403, detail="You are not a member of this team.")
         resolved.add(team.default_tag_id)
 
+        # Sync the team's tag into the metadata-tags (RepoTag) system so required-tag
+        # validation passes on subsequent PATCH /metadata-tags calls.
+        tag_row = team.default_tag_row
+        if tag_row:
+            existing_rt = await session.execute(
+                select(RepoTag).where(
+                    RepoTag.repo_id == repo_id,
+                    RepoTag.key == tag_row.key,
+                    RepoTag.tenant_id == tenant_id,
+                )
+            )
+            rt = existing_rt.scalar_one_or_none()
+            if rt:
+                rt.value = tag_row.value
+                rt.source = "auto"
+            else:
+                session.add(RepoTag(
+                    tenant_id=tenant_id, repo_id=repo_id,
+                    key=tag_row.key, value=tag_row.value, source="auto",
+                ))
+
     if not resolved and not explicit and is_new_repo:
         user_teams = await _user_team_rows(session, tenant_id, user.id)
         if len(user_teams) == 1:
             resolved.add(user_teams[0].default_tag_id)
+            # Sync the auto-assigned team tag into RepoTag as well.
+            tag_row = user_teams[0].default_tag_row
+            if tag_row:
+                existing_rt = await session.execute(
+                    select(RepoTag).where(
+                        RepoTag.repo_id == repo_id,
+                        RepoTag.key == tag_row.key,
+                        RepoTag.tenant_id == tenant_id,
+                    )
+                )
+                rt = existing_rt.scalar_one_or_none()
+                if rt:
+                    rt.value = tag_row.value
+                    rt.source = "auto"
+                else:
+                    session.add(RepoTag(
+                        tenant_id=tenant_id, repo_id=repo_id,
+                        key=tag_row.key, value=tag_row.value, source="auto",
+                    ))
         elif len(user_teams) > 1:
             raise HTTPException(
                 status_code=400,
