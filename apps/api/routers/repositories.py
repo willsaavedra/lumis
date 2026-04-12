@@ -282,6 +282,7 @@ async def activate_repository(body: ActivateRepoRequest, current: CurrentUser) -
             team_id=body.team_id,
             tag_ids=body.tag_ids,
             is_new_repo=is_new,
+            repo_full_name=repo.full_name,
         )
         refreshed = await session.execute(
             select(Repository)
@@ -596,6 +597,7 @@ async def update_repository_tags(repo_id: str, body: UpdateRepoTagsRequest, curr
             team_id=None,
             tag_ids=body.tag_ids,
             is_new_repo=False,
+            repo_full_name=repo.full_name,
         )
         await session.refresh(repo, attribute_names=["connection"])
         last_at = await _get_last_analysis_at(session, tenant_id, rid)

@@ -64,6 +64,7 @@ async def resolve_and_replace_repository_tags(
     team_id: str | None,
     tag_ids: list[str] | None,
     is_new_repo: bool,
+    repo_full_name: str | None = None,
 ) -> None:
     """
     Update repository_tags when activating or patching a repository.
@@ -152,6 +153,24 @@ async def resolve_and_replace_repository_tags(
                 status_code=400,
                 detail="team_id is required when you belong to more than one team.",
             )
+
+    if repo_full_name:
+        existing_repo_tag = await session.execute(
+            select(RepoTag).where(
+                RepoTag.repo_id == repo_id,
+                RepoTag.key == "repository",
+                RepoTag.tenant_id == tenant_id,
+            )
+        )
+        rt = existing_repo_tag.scalar_one_or_none()
+        if rt:
+            rt.value = repo_full_name
+            rt.source = "auto"
+        else:
+            session.add(RepoTag(
+                tenant_id=tenant_id, repo_id=repo_id,
+                key="repository", value=repo_full_name, source="auto",
+            ))
 
     await session.execute(delete(RepositoryTag).where(RepositoryTag.repository_id == repo_id))
     for tag_uuid in resolved:

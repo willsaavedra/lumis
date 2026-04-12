@@ -147,13 +147,22 @@ async def snapshot_tags_for_job(
 
 DEFAULT_TAG_DEFINITIONS = [
     {
+        "key": "repository",
+        "label": "Repository",
+        "description": "Repository full name (auto-filled on activation)",
+        "required": False,
+        "allowed_values": None,
+        "color_class": "tag-team",
+        "sort_order": 1,
+    },
+    {
         "key": "team",
         "label": "Squad / Team",
         "description": "Which team owns this repository",
         "required": False,
         "allowed_values": None,
         "color_class": "tag-team",
-        "sort_order": 1,
+        "sort_order": 2,
     },
     {
         "key": "env",
@@ -162,7 +171,7 @@ DEFAULT_TAG_DEFINITIONS = [
         "required": False,
         "allowed_values": ["production", "staging", "dev", "sandbox"],
         "color_class": "tag-env",
-        "sort_order": 2,
+        "sort_order": 3,
     },
     {
         "key": "cost-center",
@@ -171,7 +180,7 @@ DEFAULT_TAG_DEFINITIONS = [
         "required": False,
         "allowed_values": None,
         "color_class": "tag-cost-center",
-        "sort_order": 3,
+        "sort_order": 4,
     },
     {
         "key": "lang",
@@ -180,7 +189,7 @@ DEFAULT_TAG_DEFINITIONS = [
         "required": False,
         "allowed_values": ["go", "python", "java", "node", "typescript", "ruby", "rust"],
         "color_class": "tag-service",
-        "sort_order": 4,
+        "sort_order": 5,
     },
 ]
 
