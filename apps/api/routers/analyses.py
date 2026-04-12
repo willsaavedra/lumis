@@ -189,6 +189,7 @@ class AnalysisJobResponse(BaseModel):
     fix_pr_url: str | None = None
     fix_pr_pending: bool = False
     fix_pr_eligible: bool = False
+    fix_pr_error: str | None = None
     scope_paths: list[str] | None = None
     result: AnalysisResultPayload | None = None
 
@@ -662,6 +663,7 @@ async def create_fix_pr(job_id: str, current: CurrentUser) -> dict:
             job.fix_pr_enqueued_at = None
 
         job.fix_pr_enqueued_at = datetime.now(timezone.utc)
+        job.fix_pr_error = None
         await session.commit()
 
     _task.delay(job_id)
@@ -879,6 +881,7 @@ def _job_to_response(job: AnalysisJob) -> AnalysisJobResponse:
         fix_pr_url=job.fix_pr_url,
         fix_pr_pending=_fix_pr_pending(job),
         fix_pr_eligible=has_recommendations_for_fix_pr(job),
+        fix_pr_error=getattr(job, "fix_pr_error", None),
         scope_paths=scope_paths,
         result=result_payload,
     )

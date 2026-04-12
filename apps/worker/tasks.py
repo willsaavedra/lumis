@@ -87,9 +87,10 @@ def create_fix_pr(self, job_id: str) -> dict:
             pr_url = await _create_fix_pr(job_id)
             await _save_pr_url(job_id, pr_url)
             return {"status": "created", "pr_url": pr_url}
-        except Exception:
+        except Exception as exc:
             log.exception("fix_pr_task_failed", job_id=job_id)
-            await _clear_fix_pr_enqueue(job_id)
+            reason = str(exc)[:500] if str(exc) else "Unknown error"
+            await _clear_fix_pr_enqueue(job_id, error_reason=reason)
             raise
 
     try:
@@ -231,10 +232,11 @@ async def _save_pr_url(job_id: str, pr_url: str) -> None:
         if job:
             job.fix_pr_url = pr_url
             job.fix_pr_enqueued_at = None
+            job.fix_pr_error = None
         await session.commit()
 
 
-async def _clear_fix_pr_enqueue(job_id: str) -> None:
+async def _clear_fix_pr_enqueue(job_id: str, *, error_reason: str | None = None) -> None:
     from apps.api.core.database import AsyncSessionFactory
     from apps.api.models.analysis import AnalysisJob
     from sqlalchemy import select
@@ -244,6 +246,8 @@ async def _clear_fix_pr_enqueue(job_id: str) -> None:
         job = result.scalar_one_or_none()
         if job:
             job.fix_pr_enqueued_at = None
+            if error_reason:
+                job.fix_pr_error = error_reason
         await session.commit()
 
 
