@@ -20,7 +20,6 @@ from apps.api.core.deps import CurrentUser
 from apps.api.models.analysis import AnalysisJob, AnalysisResult, Finding, FindingFeedback, FEEDBACK_SIGNALS, FEEDBACK_TARGETS
 from apps.api.models.scm import Repository
 from apps.api.models.tag_system import AnalysisTag
-from apps.api.models.teams import RepositoryTag, Tag
 from apps.api.scm.repo_web_url import repo_web_url as build_repo_web_url
 from apps.api.services.tag_access import assert_repo_accessible, effective_tag_ids_for_user, repository_visible_predicate
 
@@ -522,17 +521,14 @@ async def list_analyses(
             conditions.append(
                 exists(
                     select(1)
-                    .select_from(RepositoryTag)
-                    .join(Tag, Tag.id == RepositoryTag.tag_id)
+                    .select_from(AnalysisTag)
                     .where(
-                        RepositoryTag.repository_id == Repository.id,
-                        Tag.tenant_id == tid,
-                        Tag.key == tag_key.strip(),
-                        Tag.value == tag_value.strip(),
+                        AnalysisTag.job_id == AnalysisJob.id,
+                        AnalysisTag.key == tag_key.strip(),
+                        AnalysisTag.value == tag_value.strip(),
                     )
                 )
             )
-            need_repo_join = True
 
     def _base_select_from():
         f = select(AnalysisJob).where(*conditions)

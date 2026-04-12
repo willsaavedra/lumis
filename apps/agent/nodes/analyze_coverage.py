@@ -436,6 +436,42 @@ def _check_instrumentation_presence(state: AgentState) -> dict:
     }
 
 
+async def _build_tags_context(state) -> str:
+    """Load analysis_tags and format them for the LLM system prompt."""
+    job_id = state.get("job_id")
+    tenant_id = state.get("tenant_id")
+    if not job_id or not tenant_id:
+        return ""
+
+    import uuid as _uuid
+    from sqlalchemy import select
+    from apps.api.core.database import get_session_with_tenant
+    from apps.api.models.tag_system import AnalysisTag
+
+    async with get_session_with_tenant(tenant_id) as session:
+        result = await session.execute(
+            select(AnalysisTag.key, AnalysisTag.value, AnalysisTag.source).where(
+                AnalysisTag.job_id == _uuid.UUID(job_id),
+            )
+        )
+        rows = result.all()
+
+    if not rows:
+        return ""
+
+    user_tags = [r for r in rows if r.source != "system"]
+    if not user_tags:
+        return ""
+
+    lines = [f"  - {r.key}: {r.value}" for r in user_tags]
+    return (
+        "\n\n## Repository Tags (metadata for this service)\n"
+        + "\n".join(lines)
+        + "\n\nUse these tags to tailor findings: env=production findings should apply stricter standards; "
+        "team tag indicates the owning squad. Do not fabricate tags not listed above."
+    )
+
+
 async def _persist_instrumentation_detection(job_id: str, tenant_id: str, vendor: str) -> None:
     """
     Best-effort: update repo.instrumentation when the probe discovers an SDK
@@ -1134,7 +1170,14 @@ async def _llm_analyze_coverage(
         language if isinstance(language, list) else ([language] if language else []),
     )
 
-    system_prompt = f"""You are an expert SRE auditing code for observability gaps (prompt version: {PROMPT_VERSION}).{app_map_section}{rag_section}{call_graph_section}{suppressed_section}{iac_constraint}{instr_constraint}
+    # Inject repository metadata tags so the LLM can tailor findings to the service context
+    tags_section = ""
+    try:
+        tags_section = await _build_tags_context(state)
+    except Exception:
+        pass
+
+    system_prompt = f"""You are an expert SRE auditing code for observability gaps (prompt version: {PROMPT_VERSION}).{app_map_section}{rag_section}{call_graph_section}{suppressed_section}{iac_constraint}{instr_constraint}{tags_section}
 
 ## Mandatory Reasoning Framework
 Before reporting ANY finding, internally answer all four questions:

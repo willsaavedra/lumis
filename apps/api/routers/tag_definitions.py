@@ -253,17 +253,17 @@ async def replace_repo_tags(repo_id: str, body: SetRepoTagsRequest, current: Ten
     inputs = [TagInput(key=t["key"], value=t["value"]) for t in body.tags if t.get("key") and t.get("value")]
 
     async with get_session_with_tenant(tenant_id) as session:
-        vr = await validate_and_warn(session, tenant_id, inputs)
+        auto_r = await session.execute(
+            select(RepoTag).where(RepoTag.repo_id == rid, RepoTag.source == "auto")
+        )
+        auto_tags = {a.key: a for a in auto_r.scalars().all()}
+
+        vr = await validate_and_warn(session, tenant_id, inputs, existing_keys=set(auto_tags.keys()))
         if not vr.valid:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=[{"key": e.key, "message": e.message} for e in vr.errors],
             )
-
-        auto_r = await session.execute(
-            select(RepoTag).where(RepoTag.repo_id == rid, RepoTag.source == "auto")
-        )
-        auto_tags = {a.key: a for a in auto_r.scalars().all()}
 
         await session.execute(
             delete(RepoTag).where(RepoTag.repo_id == rid, RepoTag.source != "auto")

@@ -69,6 +69,12 @@ def _period_range(period: str) -> tuple[datetime, datetime, datetime, datetime]:
 
 # ── Schemas ─────────────────────────────────────────────────────────────
 
+class FindingsSummary(BaseModel):
+    critical: int = 0
+    warning: int = 0
+    info: int = 0
+
+
 class OverviewKPI(BaseModel):
     avg_score: float | None = None
     score_trend: float | None = None
@@ -76,6 +82,7 @@ class OverviewKPI(BaseModel):
     analyses_trend: float | None = None
     critical_findings: int = 0
     total_cost_impact: float = 0.0
+    findings_summary: FindingsSummary = FindingsSummary()
 
 
 class ScoreHistoryPoint(BaseModel):
@@ -221,21 +228,25 @@ async def analytics_overview(
         score_trend = (avg_score - prev_avg) if (avg_score is not None and prev_avg is not None) else None
         analyses_trend = (cnt - prev_cnt) if prev_cnt else None
 
-        crit_q = (
-            select(func.count(Finding.id))
+        sev_q = (
+            select(
+                func.sum(func.cast(Finding.severity == "critical", Integer)).label("crit"),
+                func.sum(func.cast(Finding.severity == "warning", Integer)).label("warn"),
+                func.sum(func.cast(Finding.severity == "info", Integer)).label("inf"),
+            )
             .select_from(Finding)
             .join(AnalysisResult, AnalysisResult.id == Finding.result_id)
             .join(AnalysisJob, AnalysisJob.id == AnalysisResult.job_id)
             .where(
                 Finding.tenant_id == tid,
-                Finding.severity == "critical",
                 AnalysisJob.status == "completed",
                 AnalysisJob.completed_at >= start,
+                AnalysisJob.completed_at <= end,
             )
         )
         for clause in _tag_filter_exists(tag_pairs, tid):
-            crit_q = crit_q.where(clause)
-        critical_findings = (await session.execute(crit_q)).scalar() or 0
+            sev_q = sev_q.where(clause)
+        sev_row = (await session.execute(sev_q)).one()
 
         cost_q = (
             select(func.coalesce(func.sum(Finding.estimated_monthly_cost_impact), 0))
@@ -257,8 +268,13 @@ async def analytics_overview(
         score_trend=round(score_trend, 1) if score_trend is not None else None,
         analyses_count=cnt,
         analyses_trend=float(analyses_trend) if analyses_trend is not None else None,
-        critical_findings=critical_findings,
+        critical_findings=int(sev_row.crit or 0),
         total_cost_impact=round(total_cost, 2),
+        findings_summary=FindingsSummary(
+            critical=int(sev_row.crit or 0),
+            warning=int(sev_row.warn or 0),
+            info=int(sev_row.inf or 0),
+        ),
     )
 
 
@@ -440,6 +456,53 @@ async def findings_by_tag(
     return [
         FindingsByTagGroup(
             tag_value=r.tv,
+            critical=int(r.c or 0),
+            warning=int(r.w or 0),
+            info=int(r.i or 0),
+        )
+        for r in rows
+    ]
+
+
+@router.get("/findings-by-pillar", response_model=list[FindingsByTagGroup])
+async def findings_by_pillar(
+    current: CurrentUser,
+    period: str = Query("90d"),
+    tags: str | None = Query(None),
+) -> list[FindingsByTagGroup]:
+    """Group findings by pillar (metrics, logs, traces, etc.)."""
+    _, tenant_id, _ = current
+    tid = uuid.UUID(tenant_id)
+    start, end, _, _ = _period_range(period)
+    tag_pairs = _parse_tag_filter(tags)
+
+    async with get_session_with_tenant(tenant_id) as session:
+        q = (
+            select(
+                Finding.pillar.label("tv"),
+                func.sum(func.cast(Finding.severity == "critical", Integer)).label("c"),
+                func.sum(func.cast(Finding.severity == "warning", Integer)).label("w"),
+                func.sum(func.cast(Finding.severity == "info", Integer)).label("i"),
+            )
+            .select_from(Finding)
+            .join(AnalysisResult, AnalysisResult.id == Finding.result_id)
+            .join(AnalysisJob, AnalysisJob.id == AnalysisResult.job_id)
+            .where(
+                Finding.tenant_id == tid,
+                AnalysisJob.status == "completed",
+                AnalysisJob.completed_at >= start,
+                AnalysisJob.completed_at <= end,
+            )
+            .group_by(Finding.pillar)
+            .order_by(func.sum(func.cast(Finding.severity == "critical", Integer)).desc().nulls_last())
+        )
+        for clause in _tag_filter_exists(tag_pairs, tid):
+            q = q.where(clause)
+        rows = (await session.execute(q)).all()
+
+    return [
+        FindingsByTagGroup(
+            tag_value=r.tv or "unknown",
             critical=int(r.c or 0),
             warning=int(r.w or 0),
             info=int(r.i or 0),

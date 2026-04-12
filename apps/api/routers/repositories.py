@@ -13,7 +13,7 @@ from apps.api.core.database import get_session_with_tenant
 from apps.api.core.deps import CurrentUser, TenantAdmin
 from apps.api.models.analysis import AnalysisJob
 from apps.api.models.scm import Repository
-from apps.api.models.teams import RepositoryTag, Tag
+from apps.api.models.tag_system import RepoTag
 from apps.api.scm.repo_web_url import repo_web_url
 from apps.api.services.repo_tags import resolve_and_replace_repository_tags
 from apps.api.services.tag_access import (
@@ -109,13 +109,11 @@ async def list_repositories(
             q = q.where(
                 exists(
                     select(1)
-                    .select_from(RepositoryTag)
-                    .join(Tag, Tag.id == RepositoryTag.tag_id)
+                    .select_from(RepoTag)
                     .where(
-                        RepositoryTag.repository_id == Repository.id,
-                        Tag.tenant_id == tid,
-                        Tag.key == tag_key.strip(),
-                        Tag.value == tag_value.strip(),
+                        RepoTag.repo_id == Repository.id,
+                        RepoTag.key == tag_key.strip(),
+                        RepoTag.value == tag_value.strip(),
                     )
                 )
             )

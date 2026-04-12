@@ -62,29 +62,19 @@ async def validate_repo_tags(
     definitions = {d.key: d for d in defs_result.scalars().all()}
 
     issues: list[TagValidationError] = []
-    provided_keys = {t.key for t in tags}
 
     for t in tags:
         defn = definitions.get(t.key)
         if defn is None:
-            issues.append(TagValidationError(key=t.key, message=f"Unknown tag key '{t.key}'.", level="warning"))
             continue
         if defn.allowed_values and t.value not in defn.allowed_values:
             issues.append(
                 TagValidationError(
                     key=t.key,
-                    message=f"Value '{t.value}' is not allowed for '{t.key}'. Allowed: {', '.join(defn.allowed_values)}",
-                    level="error",
+                    message=f"Value '{t.value}' is not in suggested values for '{t.key}'. Suggested: {', '.join(defn.allowed_values)}",
+                    level="warning",
                 )
             )
-
-    if tags:
-        satisfied_keys = provided_keys | (existing_keys or set())
-        for key, defn in definitions.items():
-            if defn.required and key not in satisfied_keys:
-                issues.append(
-                    TagValidationError(key=key, message=f"Required tag '{key}' is missing.", level="error")
-                )
 
     return issues
 
@@ -160,7 +150,7 @@ DEFAULT_TAG_DEFINITIONS = [
         "key": "team",
         "label": "Squad / Team",
         "description": "Which team owns this repository",
-        "required": True,
+        "required": False,
         "allowed_values": None,
         "color_class": "tag-team",
         "sort_order": 1,
@@ -175,31 +165,13 @@ DEFAULT_TAG_DEFINITIONS = [
         "sort_order": 2,
     },
     {
-        "key": "criticality",
-        "label": "Business Criticality",
-        "description": "How critical this service is to the business",
-        "required": True,
-        "allowed_values": ["critical", "high", "medium", "low"],
-        "color_class": "tag-criticality",
-        "sort_order": 3,
-    },
-    {
-        "key": "domain",
-        "label": "Business Domain",
-        "description": "Business domain this service belongs to",
-        "required": False,
-        "allowed_values": None,
-        "color_class": "tag-domain",
-        "sort_order": 4,
-    },
-    {
         "key": "cost-center",
         "label": "Cost Center",
         "description": "Cost allocation center",
         "required": False,
         "allowed_values": None,
         "color_class": "tag-cost-center",
-        "sort_order": 5,
+        "sort_order": 3,
     },
     {
         "key": "lang",
@@ -208,13 +180,13 @@ DEFAULT_TAG_DEFINITIONS = [
         "required": False,
         "allowed_values": ["go", "python", "java", "node", "typescript", "ruby", "rust"],
         "color_class": "tag-service",
-        "sort_order": 6,
+        "sort_order": 4,
     },
 ]
 
 
 async def seed_default_tag_definitions(session: AsyncSession, tenant_id: uuid.UUID) -> None:
-    """Insert the 6 default tag definitions for a new tenant."""
+    """Insert the default tag definitions for a new tenant."""
     for defn in DEFAULT_TAG_DEFINITIONS:
         session.add(
             TagDefinition(
