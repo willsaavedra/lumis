@@ -12,12 +12,15 @@ import stripe
 from fastapi import APIRouter, Header, HTTPException, Request, status
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import text
+from opentelemetry import trace
+from opentelemetry.trace import StatusCode
 
 from apps.api.core.config import settings
 from apps.api.core.database import AsyncSessionFactory, db_session_no_rls
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
+tracer = trace.get_tracer(__name__)
 
 
 # ── Payload helpers ──────────────────────────────────────────────────────────
@@ -375,7 +378,8 @@ async def stripe_webhook(
     2. Deduplicate via stripe_events (idempotency).
     3. Process billing update directly — no Celery dependency.
     """
-    payload_bytes = await request.body()
+    with tracer.start_as_current_span("stripe_webhook") as span:
+        payload_bytes = await request.body()
 
     if not settings.stripe_webhook_secret:
         log.warning("stripe_webhook_secret_not_configured")
@@ -390,9 +394,13 @@ async def stripe_webhook(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Webhook error: {e}")
 
-    event_id = event["id"]
-    event_type = event["type"]
-    log.info("stripe_webhook_received", event_id=event_id, event_type=event_type)
+        event_id = event["id"]
+        event_type = event["type"]
+        span.set_attributes({
+            "stripe.event.id": event_id,
+            "stripe.event.type": event_type,
+        })
+        log.info("stripe_webhook_received", event_id=event_id, event_type=event_type)
 
     event_dict = _json_safe(_stripe_event_to_dict(event))
 
@@ -410,21 +418,23 @@ async def stripe_webhook(
         log.info("stripe_webhook_duplicate", event_id=event_id)
         return {"status": "already_processed"}
 
-    # ── Process billing update ───────────────────────────────────────────────
-    handler = _HANDLERS.get(event_type)
-    if handler:
-        try:
-            await handler(event_dict)
-        except Exception as e:
-            # Log but don't return 5xx — Stripe would retry causing duplicates.
-            log.error(
-                "stripe_event_handler_failed",
-                event_id=event_id,
-                event_type=event_type,
-                error=str(e),
-                exc_info=True,
-            )
-    else:
-        log.debug("stripe_event_unhandled", event_type=event_type)
+        # ── Process billing update ───────────────────────────────────────────────
+        handler = _HANDLERS.get(event_type)
+        if handler:
+            try:
+                await handler(event_dict)
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(StatusCode.ERROR, str(e))
+                # Log but don't return 5xx — Stripe would retry causing duplicates.
+                log.error(
+                    "stripe_event_handler_failed",
+                    event_id=event_id,
+                    event_type=event_type,
+                    error=str(e),
+                    exc_info=True,
+                )
+        else:
+            log.debug("stripe_event_unhandled", event_type=event_type)
 
     return {"status": "accepted", "event_id": event_id}

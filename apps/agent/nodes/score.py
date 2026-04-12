@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 import structlog
+from opentelemetry.trace import StatusCode
 
 from apps.agent.nodes.base import publish_progress, publish_thought
 from apps.agent.schemas import AgentState
@@ -131,100 +132,110 @@ def _detect_instrumentation(state: AgentState) -> dict:
 
 async def score_node(state: AgentState) -> dict:
     """Calculate observability scores (0-100) for each pillar."""
-    await publish_progress(state, "scoring", 75, "Calculating scores...", stage_index=8)
+    from opentelemetry import trace
+    
+    tracer = trace.get_tracer(__name__)
+    with tracer.start_as_current_span("score_node") as span:
+        try:
+            await publish_progress(state, "scoring", 75, "Calculating scores...", stage_index=8)
 
     findings = state.get("findings", [])
 
-    # If no files were actually analyzed (loaded with content), scores are meaningless.
-    # Return null scores rather than a misleading 100/100.
-    changed_files = state.get("changed_files", [])
-    analyzed = [f for f in changed_files if f.get("relevance_score", 0) >= 1 and f.get("content")]
-    if not analyzed:
-        log.warning("no_files_analyzed_skipping_scores", job_id=state.get("job_id"))
-        await publish_progress(state, "scoring", 80, "No relevant files to score.")
-        return {"efficiency_scores": {
-            "cost": None, "snr": None, "pipeline": None, "compliance": None,
-            "metrics": None, "logs": None, "traces": None, "global_score": None,
-        }}
+            # If no files were actually analyzed (loaded with content), scores are meaningless.
+            # Return null scores rather than a misleading 100/100.
+            changed_files = state.get("changed_files", [])
+            analyzed = [f for f in changed_files if f.get("relevance_score", 0) >= 1 and f.get("content")]
+            if not analyzed:
+                log.warning("no_files_analyzed_skipping_scores", job_id=state.get("job_id"))
+                await publish_progress(state, "scoring", 80, "No relevant files to score.")
+                return {"efficiency_scores": {
+                    "cost": None, "snr": None, "pipeline": None, "compliance": None,
+                    "metrics": None, "logs": None, "traces": None, "global_score": None,
+                }}
 
-    # Detect instrumentation presence — metrics and traces require an SDK or agent
-    instr = _detect_instrumentation(state)
-    repo_context = state.get("repo_context") or {}
-    is_infra_repo = (repo_context.get("repo_type") or "").lower() in ("infra", "iac")
+            # Detect instrumentation presence — metrics and traces require an SDK or agent
+            instr = _detect_instrumentation(state)
+            repo_context = state.get("repo_context") or {}
+            is_infra_repo = (repo_context.get("repo_type") or "").lower() in ("infra", "iac")
 
-    log.info(
-        "instrumentation_detected",
-        has_app_sdk=instr["has_app_sdk"],
-        has_infra_agent=instr["has_infra_agent"],
-        source=instr["source"],
-        is_infra_repo=is_infra_repo,
-        job_id=state.get("job_id"),
-    )
+            log.info(
+                "instrumentation_detected",
+                has_app_sdk=instr["has_app_sdk"],
+                has_infra_agent=instr["has_infra_agent"],
+                source=instr["source"],
+                is_infra_repo=is_infra_repo,
+                job_id=state.get("job_id"),
+            )
 
-    # Compute dimension scores (independent of instrumentation)
-    cost_score = _score_dimension(findings, "cost")
-    snr_score = _score_dimension(findings, "snr")
-    pipeline_score = _score_dimension(findings, "pipeline")
-    compliance_score = _score_dimension(findings, "compliance")
+            # Compute dimension scores (independent of instrumentation)
+            cost_score = _score_dimension(findings, "cost")
+            snr_score = _score_dimension(findings, "snr")
+            pipeline_score = _score_dimension(findings, "pipeline")
+            compliance_score = _score_dimension(findings, "compliance")
 
-    # Compute pillar scores
-    metrics_score = _score_pillar(findings, "metrics")
-    logs_score = _score_pillar(findings, "logs")
-    traces_score = _score_pillar(findings, "traces")
+            # Compute pillar scores
+            metrics_score = _score_pillar(findings, "metrics")
+            logs_score = _score_pillar(findings, "logs")
+            traces_score = _score_pillar(findings, "traces")
 
-    # ---------------------------------------------------------------------------
-    # Instrumentation gate: metrics and traces REQUIRE active instrumentation.
-    #
-    # App services need an SDK (OTEL / ddtrace / Prometheus / OpenTracing).
-    # Infra repos can rely on an agent (DD Agent / OTel Collector) for metrics;
-    # traces are still app-level and require an SDK.
-    # ---------------------------------------------------------------------------
-    if not instr["has_app_sdk"] and not instr["has_infra_agent"]:
-        # No instrumentation detected at all → both pillars are zero
-        metrics_score = 0
-        traces_score = 0
-        log.warning(
-            "no_instrumentation_zeroing_metrics_traces",
-            source=instr["source"],
-            job_id=state.get("job_id"),
-        )
-    elif not instr["has_app_sdk"]:
-        # Infra agent present but no app SDK → traces require app SDK, zero them
-        # Metrics can be partially scored (infra metrics may exist)
-        traces_score = 0
-        log.info(
-            "no_app_sdk_zeroing_traces",
-            has_infra_agent=instr["has_infra_agent"],
-            job_id=state.get("job_id"),
-        )
+            # ---------------------------------------------------------------------------
+            # Instrumentation gate: metrics and traces REQUIRE active instrumentation.
+            #
+            # App services need an SDK (OTEL / ddtrace / Prometheus / OpenTracing).
+            # Infra repos can rely on an agent (DD Agent / OTel Collector) for metrics;
+            # traces are still app-level and require an SDK.
+            # ---------------------------------------------------------------------------
+            if not instr["has_app_sdk"] and not instr["has_infra_agent"]:
+                # No instrumentation detected at all → both pillars are zero
+                metrics_score = 0
+                traces_score = 0
+                log.warning(
+                    "no_instrumentation_zeroing_metrics_traces",
+                    source=instr["source"],
+                    job_id=state.get("job_id"),
+                )
+            elif not instr["has_app_sdk"]:
+                # Infra agent present but no app SDK → traces require app SDK, zero them
+                # Metrics can be partially scored (infra metrics may exist)
+                traces_score = 0
+                log.info(
+                    "no_app_sdk_zeroing_traces",
+                    has_infra_agent=instr["has_infra_agent"],
+                    job_id=state.get("job_id"),
+                )
 
-    # Global score = weighted average of pillar scores
-    global_score = int(
-        metrics_score * 0.35
-        + logs_score * 0.35
-        + traces_score * 0.30
-    )
+            # Global score = weighted average of pillar scores
+            global_score = int(
+                metrics_score * 0.35
+                + logs_score * 0.35
+                + traces_score * 0.30
+            )
 
-    scores = {
-        "cost": cost_score,
-        "snr": snr_score,
-        "pipeline": pipeline_score,
-        "compliance": compliance_score,
-        "metrics": metrics_score,
-        "logs": logs_score,
-        "traces": traces_score,
-        "global_score": global_score,
-        "instrumentation_detected": instr["has_app_sdk"] or instr["has_infra_agent"],
-    }
+            scores = {
+                "cost": cost_score,
+                "snr": snr_score,
+                "pipeline": pipeline_score,
+                "compliance": compliance_score,
+                "metrics": metrics_score,
+                "logs": logs_score,
+                "traces": traces_score,
+                "global_score": global_score,
+                "instrumentation_detected": instr["has_app_sdk"] or instr["has_infra_agent"],
+            }
 
-    log.info("scores_calculated", global_score=global_score, scores=scores)
-    await publish_thought(
-        state, "score",
-        f"Global score: {global_score}/100 — Metrics: {metrics_score}, Logs: {logs_score}, Traces: {traces_score}",
-        status="done",
-    )
-    await publish_progress(state, "scoring", 80, f"Global score: {global_score}/100", stage_index=8)
-    return {"efficiency_scores": scores}
+            log.info("scores_calculated", global_score=global_score, scores=scores)
+            await publish_thought(
+                state, "score",
+                f"Global score: {global_score}/100 — Metrics: {metrics_score}, Logs: {logs_score}, Traces: {traces_score}",
+                status="done",
+            )
+            await publish_progress(state, "scoring", 80, f"Global score: {global_score}/100", stage_index=8)
+            return {"efficiency_scores": scores}
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(StatusCode.ERROR, str(exc))
+            log.error("operation_failed", exc_info=True)
+            raise
 
 
 def _penalty(kind: str, severity: str, pillar_or_dim: str) -> int:

@@ -5,6 +5,8 @@ import uuid
 from typing import Any
 
 import structlog
+from opentelemetry import trace
+from opentelemetry.trace import StatusCode
 
 from apps.agent.nodes.base import publish_progress, publish_thought
 from apps.agent.nodes.deduplicate import _fingerprint
@@ -45,7 +47,11 @@ async def diff_crossrun_node(state: AgentState) -> dict:
                 changed_files=changed_files,
             )
         except Exception as exc:
-            log.warning("diff_crossrun_lookup_failed", error=str(exc))
+            span = trace.get_current_span()
+            span.record_exception(exc)
+            span.set_status(StatusCode.ERROR, str(exc))
+            ctx = trace.get_current_span().get_span_context()
+            log.warning("diff_crossrun_lookup_failed", trace_id=format(ctx.trace_id, "032x"), error=str(exc), exc_info=True)
 
     prev_fps: set[str] = set()
     fp_to_prev: dict[str, dict] = {}

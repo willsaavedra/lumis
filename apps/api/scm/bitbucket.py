@@ -6,6 +6,7 @@ from urllib.parse import quote
 
 import httpx
 import structlog
+from opentelemetry.trace import StatusCode
 
 from apps.api.core.config import settings
 from apps.api.scm.base import SCMAdapter
@@ -132,36 +133,49 @@ async def _list_src_via_api(
     path: str,
 ) -> list[dict]:
     """List files at path using Bitbucket file history / tree workaround."""
-    base = f"{API_ROOT}/repositories/{workspace}/{repo_slug}/src/{quote(ref, safe='')}"
-    path = path.strip().lstrip("/")
-    url = f"{base}/{path}" if path else f"{base}/"
-    async with httpx.AsyncClient() as client:
-        r = await client.get(
-            url,
-            headers={**_headers(token), "Accept": "application/json"},
-            timeout=30.0,
-        )
-    if r.status_code != 200:
-        return []
-    try:
-        payload = r.json()
-    except Exception:
-        return []
-    if not isinstance(payload, list):
-        return []
-    out: list[dict] = []
-    for node in payload:
-        t = node.get("type")
-        out.append(
-            {
-                "name": node.get("path", "").split("/")[-1] or node.get("path", ""),
-                "path": node.get("path", ""),
-                "type": "dir" if t == "commit_directory" else "file",
-                "size": node.get("size"),
-            }
-        )
-    out.sort(key=lambda x: (x["type"] == "file", x["name"].lower()))
-    return out
+    from opentelemetry import trace
+    
+    tracer = trace.get_tracer(__name__)
+    
+    with tracer.start_as_current_span("bitbucket_list_src") as span:
+        span.set_attribute("workspace", workspace)
+        span.set_attribute("repo_slug", repo_slug)
+        span.set_attribute("ref", ref)
+        span.set_attribute("path", path)
+        
+        base = f"{API_ROOT}/repositories/{workspace}/{repo_slug}/src/{quote(ref, safe='')}"
+        path = path.strip().lstrip("/")
+        url = f"{base}/{path}" if path else f"{base}/"
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                url,
+                headers={**_headers(token), "Accept": "application/json"},
+                timeout=30.0,
+            )
+        if r.status_code != 200:
+            return []
+        try:
+            payload = r.json()
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(StatusCode.ERROR, str(exc))
+            log.error("json_parse_failed", exc_info=True, workspace=workspace, repo_slug=repo_slug, ref=ref, path=path)
+            return []
+        if not isinstance(payload, list):
+            return []
+        out: list[dict] = []
+        for node in payload:
+            t = node.get("type")
+            out.append(
+                {
+                    "name": node.get("path", "").split("/")[-1] or node.get("path", ""),
+                    "path": node.get("path", ""),
+                    "type": "dir" if t == "commit_directory" else "file",
+                    "size": node.get("size"),
+                }
+            )
+        out.sort(key=lambda x: (x["type"] == "file", x["name"].lower()))
+        return out
 
 
 def authenticated_clone_url(token: str, clone_url: str | None, full_name: str) -> str:

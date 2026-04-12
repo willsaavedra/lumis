@@ -13,11 +13,14 @@ from __future__ import annotations
 import asyncio
 
 import structlog
+from opentelemetry import trace
+from opentelemetry.trace import StatusCode
 
 from apps.agent.nodes.base import publish_progress, publish_thought
 from apps.agent.schemas import AgentState
 
 log = structlog.get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 # Max tokens to inject into the LLM prompt
 _MAX_RAG_TOKENS = 3000
@@ -45,11 +48,14 @@ async def retrieve_context_node(state: AgentState) -> dict:
         log.warning("retrieve_context_skipped_no_openai_key")
         return {"rag_context": None}
 
-    try:
-        rag_context = await _retrieve(state)
-    except Exception as e:
-        log.warning("retrieve_context_failed", error=str(e))
-        rag_context = None
+    with tracer.start_as_current_span("retrieve_context") as span:
+        try:
+            rag_context = await _retrieve(state)
+        except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
+            log.error("retrieve_context_failed", error=str(e), exc_info=True)
+            rag_context = None
 
     if rag_context:
         log.info(

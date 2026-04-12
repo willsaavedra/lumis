@@ -14,6 +14,7 @@ from typing import Any
 
 import structlog
 import yaml
+from opentelemetry import trace
 
 from apps.worker.celery_app import celery_app
 from apps.agent.tasks.rag_shared import (
@@ -50,7 +51,8 @@ async def _run(tenant_id: str, yaml_content: str, repo_full_name: str) -> dict:
 
     chunks_text = _extract_rule_chunks(config, repo_full_name)
     if not chunks_text:
-        log.info("no_rules_found_in_lumis_yaml", tenant_id=tenant_id)
+        ctx = trace.get_current_span().get_span_context()
+        log.info("no_rules_found_in_lumis_yaml", trace_id=format(ctx.trace_id, "032x"), tenant_id=tenant_id)
         return {"inserted": 0}
 
     embeddings = await embed_texts(chunks_text)

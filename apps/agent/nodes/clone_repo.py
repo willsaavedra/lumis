@@ -7,11 +7,14 @@ import uuid
 from pathlib import Path
 
 import structlog
+from opentelemetry import trace
+from opentelemetry.trace import StatusCode
 
 from apps.agent.nodes.base import publish_progress, publish_thought
 from apps.agent.schemas import AgentState
 
 log = structlog.get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 async def clone_repo_node(state: AgentState) -> dict:
@@ -24,23 +27,26 @@ async def clone_repo_node(state: AgentState) -> dict:
     repo_path = Path(f"/tmp/lumis-{job_id}")
     repo_path.mkdir(parents=True, exist_ok=True)
 
-    try:
-        clone_url = request["clone_url"]
-        ref = request.get("ref", "main")
-        installation_id = request.get("installation_id")
-        scm_type = request.get("scm_type") or "github"
-        repo_id = request.get("repo_id")
+    with tracer.start_as_current_span("clone_repo") as span:
+        try:
+            clone_url = request["clone_url"]
+            ref = request.get("ref", "main")
+            installation_id = request.get("installation_id")
+            scm_type = request.get("scm_type") or "github"
+            repo_id = request.get("repo_id")
 
-        # If GitHub App, get fresh token for clone URL
-        if installation_id and scm_type == "github":
-            try:
-                from apps.api.scm.github import GitHubTokenManager
-                token_manager = GitHubTokenManager()
-                token = await token_manager.get_installation_token(int(installation_id))
-                full_name = request["repo_full_name"]
-                clone_url = f"https://x-access-token:{token}@github.com/{full_name}.git"
-            except Exception as e:
-                log.warning("token_fetch_failed_using_public_url", error=str(e))
+            # If GitHub App, get fresh token for clone URL
+            if installation_id and scm_type == "github":
+                try:
+                    from apps.api.scm.github import GitHubTokenManager
+                    token_manager = GitHubTokenManager()
+                    token = await token_manager.get_installation_token(int(installation_id))
+                    full_name = request["repo_full_name"]
+                    clone_url = f"https://x-access-token:{token}@github.com/{full_name}.git"
+                except Exception as exc:
+                    span.record_exception(exc)
+                    span.set_status(StatusCode.ERROR, str(exc))
+                    log.error("token_fetch_failed_using_public_url", error=str(exc), exc_info=True)
 
         elif scm_type in ("gitlab", "bitbucket") and repo_id:
             try:
@@ -69,9 +75,11 @@ async def clone_repo_node(state: AgentState) -> dict:
                                 else:
                                     from apps.api.scm.bitbucket import authenticated_clone_url as bb_auth
 
-                                    clone_url = bb_auth(raw, clone_url, request["repo_full_name"])
-            except Exception as e:
-                log.warning("oauth_clone_url_failed", error=str(e), scm_type=scm_type)
+                                        clone_url = bb_auth(raw, clone_url, request["repo_full_name"])
+                except Exception as exc:
+                    span.record_exception(exc)
+                    span.set_status(StatusCode.ERROR, str(exc))
+                    log.error("oauth_clone_url_failed", error=str(exc), scm_type=scm_type, exc_info=True)
 
         result = subprocess.run(
             ["git", "clone", "--depth", "1", "--branch", ref, clone_url, str(repo_path)],
