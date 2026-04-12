@@ -98,13 +98,19 @@ def _build_file_tree(repo: Path, max_entries: int = 80) -> str:
 async def context_discovery_node(state: AgentState) -> dict:
     """
     Read key repo files and generate a context summary using Claude.
-    Saves the summary to repository.context_summary and marks the job complete.
+
+    Standalone mode (analysis_type="context"): saves context, marks job complete, cleans up.
+    Inline mode (full/repository without context): saves context, updates state, continues pipeline.
     """
+    analysis_type = state.get("request", {}).get("analysis_type", "full")
+    is_standalone = analysis_type == "context"
+
     await publish_progress(state, "discovering", 20, "Reading repository structure...")
 
     repo_path = state.get("repo_path")
     if not repo_path:
-        await _mark_job_failed(state["job_id"], state["tenant_id"], "repo_path not set")
+        if is_standalone:
+            await _mark_job_failed(state["job_id"], state["tenant_id"], "repo_path not set")
         return {"stage": "done", "progress_pct": 100}
 
     repo = Path(repo_path)
@@ -130,14 +136,29 @@ async def context_discovery_node(state: AgentState) -> dict:
     await publish_progress(state, "discovering", 85, "Saving context...")
 
     if summary or detected_languages or app_map:
-        await _save_context_summary(state["job_id"], state["tenant_id"], summary, detected_languages, app_map=app_map)
+        if is_standalone:
+            await _save_context_summary(state["job_id"], state["tenant_id"], summary, detected_languages, app_map=app_map)
+        else:
+            await _save_context_to_repo(state["job_id"], state["tenant_id"], summary, detected_languages, app_map=app_map)
 
-    # Cleanup
-    shutil.rmtree(repo_path, ignore_errors=True)
+    if is_standalone:
+        shutil.rmtree(repo_path, ignore_errors=True)
+        await publish_progress(state, "done", 100, "Context discovery complete!")
+        log.info("context_discovery_complete", job_id=state["job_id"], mode="standalone")
+        return {"stage": "done", "progress_pct": 100}
 
-    await publish_progress(state, "done", 100, "Context discovery complete!")
-    log.info("context_discovery_complete", job_id=state["job_id"])
-    return {"stage": "done", "progress_pct": 100}
+    updated_context = dict(state.get("repo_context") or {})
+    if summary:
+        updated_context["context_summary"] = summary
+    if app_map:
+        updated_context["app_map"] = app_map
+    if detected_languages:
+        existing = list(updated_context.get("language") or [])
+        merged = existing + [l for l in detected_languages if l not in existing]
+        updated_context["language"] = merged
+
+    log.info("context_discovery_complete", job_id=state["job_id"], mode="inline")
+    return {"repo_context": updated_context}
 
 
 async def _generate_summary(state: AgentState, context_files: dict[str, str]) -> str:
@@ -308,6 +329,48 @@ async def _save_context_summary(
         job.credits_consumed = 0
 
     log.info("context_summary_saved", job_id=job_id, languages=detected_languages)
+
+
+async def _save_context_to_repo(
+    job_id: str,
+    tenant_id: str,
+    summary: str | None,
+    detected_languages: list[str],
+    *,
+    app_map: dict | None = None,
+) -> None:
+    """Persist context to the Repository row without marking the analysis job as completed."""
+    import uuid
+    from sqlalchemy import select
+    from apps.api.core.database import get_session_with_tenant
+    from apps.api.models.analysis import AnalysisJob
+    from apps.api.models.scm import Repository
+    from datetime import datetime, timezone
+
+    async with get_session_with_tenant(tenant_id) as session:
+        job_result = await session.execute(
+            select(AnalysisJob).where(AnalysisJob.id == uuid.UUID(job_id))
+        )
+        job = job_result.scalar_one_or_none()
+        if not job:
+            return
+
+        repo_result = await session.execute(
+            select(Repository).where(Repository.id == job.repo_id)
+        )
+        repo = repo_result.scalar_one_or_none()
+        if repo:
+            if summary:
+                repo.context_summary = summary
+            if app_map:
+                repo.app_map = app_map
+            repo.context_updated_at = datetime.now(timezone.utc)
+            if detected_languages:
+                existing = list(repo.language or [])
+                merged = existing + [l for l in detected_languages if l not in existing]
+                repo.language = merged
+
+    log.info("context_saved_inline", job_id=job_id, languages=detected_languages)
 
 
 async def _mark_job_failed(job_id: str, tenant_id: str, reason: str) -> None:

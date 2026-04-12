@@ -32,10 +32,22 @@ log = structlog.get_logger(__name__)
 
 
 def _route_after_clone(state: AgentState) -> str:
-    """After cloning, context analyses go directly to discovery; others continue the pipeline."""
+    """After cloning, route to context discovery when context is missing or stale."""
     analysis_type = state.get("request", {}).get("analysis_type", "full")
     if analysis_type == "context":
         return "context_discovery"
+    if analysis_type in ("full", "repository"):
+        ctx = state.get("repo_context") or {}
+        if not ctx.get("context_summary"):
+            return "context_discovery"
+    return "pre_triage"
+
+
+def _route_after_context_discovery(state: AgentState) -> str:
+    """Standalone context jobs exit; inline context continues to pre_triage."""
+    analysis_type = state.get("request", {}).get("analysis_type", "full")
+    if analysis_type == "context":
+        return END
     return "pre_triage"
 
 
@@ -96,8 +108,11 @@ def build_graph() -> StateGraph:
         "pre_triage": "pre_triage",
     })
 
-    # Context discovery exits immediately
-    workflow.add_edge("context_discovery", END)
+    # Standalone context jobs exit; inline context continues the pipeline
+    workflow.add_conditional_edges("context_discovery", _route_after_context_discovery, {
+        END: END,
+        "pre_triage": "pre_triage",
+    })
 
     # Branch after triage:
     #   quick     → retrieve_context (limited RAG) → analyze_coverage

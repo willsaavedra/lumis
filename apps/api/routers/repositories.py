@@ -52,6 +52,7 @@ class RepoResponse(BaseModel):
     context_summary: str | None = None
     last_analysis_at: str | None = None
     tags: list[TagOut] = Field(default_factory=list)
+    initial_analysis_id: str | None = None
 
 
 class ActivateRepoRequest(BaseModel):
@@ -292,7 +293,27 @@ async def activate_repository(body: ActivateRepoRequest, current: CurrentUser) -
         repo = refreshed.scalar_one()
         last_analysis_at = await _get_last_analysis_at(session, tenant_id, repo.id)
         tag_map = await load_tags_for_repositories(session, tenant_id, [repo.id])
-    return _repo_to_response(repo, last_analysis_at, tags=tag_map.get(repo.id, []))
+
+        initial_job_id: str | None = None
+        if is_new:
+            try:
+                from apps.api.services.analysis_service import enqueue_manual_analysis
+                job = await enqueue_manual_analysis(
+                    session,
+                    tenant_id,
+                    str(repo.id),
+                    body.default_branch,
+                    "repository",
+                )
+                initial_job_id = str(job.id)
+                log.info("initial_analysis_enqueued", repo_id=str(repo.id), job_id=initial_job_id)
+            except Exception as e:
+                log.warning("initial_analysis_enqueue_failed", repo_id=str(repo.id), error=str(e))
+
+    resp = _repo_to_response(repo, last_analysis_at, tags=tag_map.get(repo.id, []))
+    if initial_job_id:
+        resp.initial_analysis_id = initial_job_id
+    return resp
 
 
 @router.post("/{repo_id}/activate", response_model=RepoResponse)
