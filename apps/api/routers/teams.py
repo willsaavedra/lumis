@@ -110,7 +110,7 @@ async def list_teams(current: CurrentUser) -> list[TeamResponse]:
 
 @router.post("", response_model=TeamResponse, status_code=status.HTTP_201_CREATED)
 async def create_team(body: CreateTeamRequest, current: TenantAdmin) -> TeamResponse:
-    _admin, tenant_id, _ = current
+    admin_user, tenant_id, _ = current
     tid = uuid.UUID(tenant_id)
     slug = body.slug.strip().lower()
     if not SLUG_RE.match(slug):
@@ -127,6 +127,9 @@ async def create_team(body: CreateTeamRequest, current: TenantAdmin) -> TeamResp
         await session.flush()
         team = Team(tenant_id=tid, name=body.name.strip(), slug=slug, default_tag_id=tag.id)
         session.add(team)
+        await session.flush()
+        # Auto-add the creating admin as a team member.
+        session.add(TeamMembership(team_id=team.id, user_id=admin_user.id, tenant_id=tid))
         await session.flush()
         r2 = await session.execute(
             select(Team)

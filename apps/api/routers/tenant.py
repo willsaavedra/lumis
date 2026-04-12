@@ -6,11 +6,12 @@ import uuid
 import structlog
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from apps.api.core.database import get_session_with_tenant
 from apps.api.core.deps import CurrentUser, TenantAdmin
 from apps.api.models.auth import Tenant
+from apps.api.models.teams import Team
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
@@ -78,3 +79,27 @@ async def update_onboarding(body: UpdateOnboardingRequest, current: CurrentUser)
             raise HTTPException(status_code=404)
         tenant.onboarding_step = max(tenant.onboarding_step, body.step)
     return {"onboarding_step": tenant.onboarding_step}
+
+
+@router.patch("/onboarding/complete")
+async def complete_onboarding(current: TenantAdmin) -> dict:
+    """Mark onboarding as complete. Requires at least one platform team to exist."""
+    _user, tenant_id, _ = current
+    tid = uuid.UUID(tenant_id)
+    async with get_session_with_tenant(tenant_id) as session:
+        team_count_result = await session.execute(
+            select(func.count(Team.id)).where(Team.tenant_id == tid)
+        )
+        team_count = team_count_result.scalar_one()
+        if team_count == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="At least one team must be created before completing onboarding.",
+            )
+        result = await session.execute(select(Tenant).where(Tenant.id == tid))
+        tenant = result.scalar_one_or_none()
+        if not tenant:
+            raise HTTPException(status_code=404)
+        tenant.needs_onboarding = False
+    log.info("onboarding_completed", tenant_id=tenant_id)
+    return {"needs_onboarding": False}

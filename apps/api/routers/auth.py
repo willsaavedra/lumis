@@ -103,6 +103,7 @@ class MeResponse(BaseModel):
     membership_role: str
     tenants: list[TenantSummary]
     needs_tenant_profile: bool
+    needs_onboarding: bool = False
 
 
 class InvitePreviewResponse(BaseModel):
@@ -247,6 +248,7 @@ async def _find_or_create_google_user(session: AsyncSession, profile: dict) -> U
         credits_remaining=50,
         credits_monthly_limit=50,
         needs_profile_completion=False,
+        needs_onboarding=True,
     )
     session.add(tenant)
     await session.flush()
@@ -310,6 +312,7 @@ async def signup(
             credits_remaining=50,
             credits_monthly_limit=50,
             needs_profile_completion=False,
+            needs_onboarding=True,
         )
         session.add(tenant)
         await session.flush()  # Get tenant.id without committing
@@ -464,6 +467,7 @@ async def auth_me(
     result = await session.execute(select(Tenant).where(Tenant.id == uuid.UUID(active_tid)))
     tenant = result.scalar_one_or_none()
     needs_profile = bool(tenant and tenant.needs_profile_completion and role == "admin")
+    needs_onboarding = bool(tenant and tenant.needs_onboarding)
     return MeResponse(
         email=user.email,
         user_id=str(user.id),
@@ -471,6 +475,7 @@ async def auth_me(
         membership_role=role,
         tenants=summaries,
         needs_tenant_profile=needs_profile,
+        needs_onboarding=needs_onboarding,
     )
 
 
