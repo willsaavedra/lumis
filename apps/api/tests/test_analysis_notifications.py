@@ -4,7 +4,9 @@ from __future__ import annotations
 from apps.api.services.analysis_notifications import (
     analysis_report_url,
     build_slack_payload,
+    build_slack_payload_fix_pr,
     build_teams_message_card,
+    build_teams_message_card_fix_pr,
     webhook_url_hint,
 )
 
@@ -57,3 +59,27 @@ def test_build_teams_message_card_structure():
     assert card["@type"] == "MessageCard"
     assert "potentialAction" in card
     assert any("acme/api" in str(f.get("value", "")) for f in card["sections"][0]["facts"])
+
+
+def test_build_slack_payload_fix_pr_contains_pr_and_report_links():
+    payload = build_slack_payload_fix_pr(
+        repo_full_name="acme/api",
+        job_id="33333333-3333-3333-3333-333333333333",
+        pr_url="https://github.com/acme/api/pull/42",
+    )
+    assert "fix PR" in payload["text"].lower() or "PR opened" in payload["text"]
+    assert "github.com/acme/api/pull/42" in payload["text"]
+    report = analysis_report_url("33333333-3333-3333-3333-333333333333")
+    assert report in payload["text"]
+
+
+def test_build_teams_message_card_fix_pr_structure():
+    card = build_teams_message_card_fix_pr(
+        repo_full_name="acme/api",
+        job_id="44444444-4444-4444-4444-444444444444",
+        pr_url="https://github.com/acme/api/pull/99",
+    )
+    assert card["@type"] == "MessageCard"
+    assert len(card["potentialAction"]) >= 2
+    uris = str(card)
+    assert "github.com/acme/api/pull/99" in uris

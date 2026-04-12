@@ -82,10 +82,15 @@ def create_fix_pr(self, job_id: str) -> dict:
     log.info("fix_pr_task_started", job_id=job_id)
 
     async def _run():
+        from apps.api.services.analysis_notifications import notify_fix_pr_created
         from apps.api.services.fix_pr_service import create_fix_pr as _create_fix_pr
         try:
             pr_url = await _create_fix_pr(job_id)
             await _save_pr_url(job_id, pr_url)
+            try:
+                await notify_fix_pr_created(job_id=job_id, pr_url=pr_url)
+            except Exception:
+                log.exception("notify_fix_pr_created_failed", job_id=job_id)
             return {"status": "created", "pr_url": pr_url}
         except Exception as exc:
             log.exception("fix_pr_task_failed", job_id=job_id)

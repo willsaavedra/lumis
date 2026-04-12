@@ -173,6 +173,141 @@ async def send_teams_incoming(webhook_url: str, payload: dict[str, Any]) -> None
         r.raise_for_status()
 
 
+def build_slack_payload_fix_pr(
+    *,
+    repo_full_name: str,
+    job_id: str,
+    pr_url: str,
+) -> dict[str, Any]:
+    report_url = analysis_report_url(job_id)
+    lines = [
+        "*Horion* — observability fix PR opened",
+        f"*Repository:* `{repo_full_name}`",
+        f"*Pull request:* <{pr_url}|Open on GitHub>",
+    ]
+    text = "\n".join(lines) + f"\n<{report_url}|View analysis in Horion>"
+    return {
+        "text": text,
+        "blocks": [
+            {"type": "section", "text": {"type": "mrkdwn", "text": text}},
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Open PR", "emoji": True},
+                        "url": pr_url,
+                        "style": "primary",
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Analysis report", "emoji": True},
+                        "url": report_url,
+                    },
+                ],
+            },
+        ],
+    }
+
+
+def build_teams_message_card_fix_pr(
+    *,
+    repo_full_name: str,
+    job_id: str,
+    pr_url: str,
+) -> dict[str, Any]:
+    report_url = analysis_report_url(job_id)
+    return {
+        "@type": "MessageCard",
+        "@context": "https://schema.org/extensions",
+        "summary": f"Horion: fix PR for {repo_full_name}",
+        "themeColor": "276749",
+        "title": "Observability fix PR opened",
+        "sections": [
+            {
+                "activityTitle": "Horion reliability",
+                "facts": [
+                    {"name": "Repository", "value": repo_full_name},
+                    {"name": "Pull request", "value": pr_url},
+                ],
+                "markdown": True,
+            }
+        ],
+        "potentialAction": [
+            {"@type": "OpenUri", "name": "Open PR", "targets": [{"os": "default", "uri": pr_url}]},
+            {"@type": "OpenUri", "name": "View analysis", "targets": [{"os": "default", "uri": report_url}]},
+        ],
+    }
+
+
+async def notify_fix_pr_created(*, job_id: str, pr_url: str) -> None:
+    """
+    Post to team Slack / Teams when a Horion-generated fix PR is created.
+    Skips when team has no webhooks, notify_on_fix_pr is false, or repo has no linked team.
+    """
+    try:
+        jid = uuid.UUID(job_id)
+    except ValueError:
+        log.warning("notify_fix_pr_invalid_uuid", job_id=job_id)
+        return
+
+    from apps.api.core.database import AsyncSessionFactory
+
+    async with AsyncSessionFactory() as session:
+        job_result = await session.execute(select(AnalysisJob).where(AnalysisJob.id == jid))
+        job = job_result.scalar_one_or_none()
+        if not job:
+            return
+        tenant_id = str(job.tenant_id)
+        repo_id = str(job.repo_id)
+        tid = job.tenant_id
+        rid = job.repo_id
+
+    from apps.api.core.database import get_session_with_tenant
+
+    async with get_session_with_tenant(tenant_id) as session:
+        team = await resolve_team_for_repo(session, tid, rid)
+        if not team:
+            log.debug("notify_fix_pr_no_team_for_repo", job_id=job_id, repo_id=repo_id)
+            return
+        if not team.notify_on_fix_pr:
+            return
+
+        slack_url = decrypt_scm_token(team.slack_webhook_encrypted)
+        teams_url = decrypt_scm_token(team.msteams_webhook_encrypted)
+        if not slack_url and not teams_url:
+            return
+
+        repo_result = await session.execute(select(Repository).where(Repository.id == rid))
+        repo = repo_result.scalar_one_or_none()
+        repo_name = repo.full_name if repo else repo_id
+
+        team_id_str = str(team.id)
+        slack_body = build_slack_payload_fix_pr(
+            repo_full_name=repo_name,
+            job_id=job_id,
+            pr_url=pr_url,
+        )
+        teams_body = build_teams_message_card_fix_pr(
+            repo_full_name=repo_name,
+            job_id=job_id,
+            pr_url=pr_url,
+        )
+
+    if slack_url:
+        try:
+            await send_slack_incoming(slack_url, slack_body)
+            log.info("notify_fix_pr_slack_sent", job_id=job_id, team_id=team_id_str)
+        except Exception as e:
+            log.warning("notify_fix_pr_slack_failed", job_id=job_id, error=str(e))
+    if teams_url:
+        try:
+            await send_teams_incoming(teams_url, teams_body)
+            log.info("notify_fix_pr_teams_sent", job_id=job_id, team_id=team_id_str)
+        except Exception as e:
+            log.warning("notify_fix_pr_teams_failed", job_id=job_id, error=str(e))
+
+
 async def notify_analysis_completed(
     *,
     job_id: str,

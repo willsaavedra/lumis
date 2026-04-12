@@ -67,6 +67,7 @@ class TeamNotificationsResponse(BaseModel):
     slack_url_hint: str | None
     teams_url_hint: str | None
     notify_on_analysis_complete: bool
+    notify_on_fix_pr: bool
 
 
 class PatchTeamNotificationsBody(BaseModel):
@@ -75,6 +76,7 @@ class PatchTeamNotificationsBody(BaseModel):
     slack_webhook_url: str | None = None
     msteams_webhook_url: str | None = None
     notify_on_analysis_complete: bool | None = None
+    notify_on_fix_pr: bool | None = None
 
 
 class TestNotificationBody(BaseModel):
@@ -146,6 +148,7 @@ def _notifications_response(team: Team) -> TeamNotificationsResponse:
         slack_url_hint=webhook_url_hint(slack_plain),
         teams_url_hint=webhook_url_hint(teams_plain),
         notify_on_analysis_complete=bool(team.notify_on_analysis_complete),
+        notify_on_fix_pr=bool(getattr(team, "notify_on_fix_pr", True)),
     )
 
 
@@ -187,6 +190,8 @@ async def patch_team_notifications(
             team.msteams_webhook_encrypted = None if raw is None or str(raw).strip() == "" else encrypt_webhook_url(str(raw))
         if "notify_on_analysis_complete" in data and data["notify_on_analysis_complete"] is not None:
             team.notify_on_analysis_complete = bool(data["notify_on_analysis_complete"])
+        if "notify_on_fix_pr" in data and data["notify_on_fix_pr"] is not None:
+            team.notify_on_fix_pr = bool(data["notify_on_fix_pr"])
         await session.flush()
         out = _notifications_response(team)
     log.info("team_notifications_updated", team_id=team_id, tenant_id=tenant_id)

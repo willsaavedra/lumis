@@ -38,6 +38,9 @@ class Team(Base):
     notify_on_analysis_complete: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true"), default=True
     )
+    notify_on_fix_pr: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true"), default=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     default_tag_row: Mapped["Tag"] = relationship(foreign_keys=[default_tag_id])
