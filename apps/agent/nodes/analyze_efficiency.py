@@ -189,12 +189,15 @@ def _check_spans_in_loops(
     )
     in_loop = False
     loop_start = 0
+    span_lines = []
+    
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
         # Detect loop entry
         if any(re.search(p, stripped) for p in DEBUG_LOG_HOTPATH):
             in_loop = True
             loop_start = i
+            span_lines = []
         # Detect span creation inside loop
         if in_loop and any(k in stripped.lower() for k in ("startspan", "start_span", "tracer.start", "otel.span")):
             findings.append({
@@ -212,6 +215,21 @@ def _check_spans_in_loops(
             in_loop = False
         # Reset loop on dedent (simplified heuristic)
         if in_loop and i > loop_start + 50:
+            # Report all spans found in this loop
+            if span_lines:
+                for span_line in span_lines:
+                    findings.append({
+                        "pillar": "traces",
+                        "severity": "warning",
+                        "dimension": "cost",
+                        "title": "N+1 span pattern: span created inside loop",
+                        "description": "Creating spans inside loops generates O(n) spans and can flood your tracing backend.",
+                        "file_path": path,
+                        "line_start": span_line,
+                        "line_end": span_line,
+                        "suggestion": parent_span_hint,
+                        "estimated_monthly_cost_impact": 80.0,
+                    })
             in_loop = False
 
 

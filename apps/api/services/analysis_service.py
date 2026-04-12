@@ -10,6 +10,8 @@ import structlog
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from opentelemetry import trace
+from opentelemetry.trace import StatusCode
 
 from apps.api.billing.billing_gate import ANALYSIS_COSTS, BillingGate
 from apps.api.models.analysis import AnalysisJob
@@ -19,6 +21,7 @@ _CONTEXT_REFRESH_INTERVAL = timedelta(days=30)
 
 log = structlog.get_logger(__name__)
 billing_gate = BillingGate()
+tracer = trace.get_tracer(__name__)
 
 
 @dataclass
@@ -231,20 +234,22 @@ async def enqueue_manual_analysis(
     selected_paths: list[str] | None = None,
 ) -> AnalysisJob:
     """Enqueue a manual analysis triggered via API."""
-    repo_result = await session.execute(
-        select(Repository).where(
-            Repository.id == uuid.UUID(repo_id),
-            Repository.tenant_id == uuid.UUID(tenant_id),
-            Repository.is_active == True,
-        )
-    )
-    repo = repo_result.scalar_one_or_none()
-    if not repo:
-        raise HTTPException(status_code=404, detail="Repository not found or not active.")
+    with tracer.start_as_current_span("enqueue_manual_analysis") as span:
+        try:
+            repo_result = await session.execute(
+                select(Repository).where(
+                    Repository.id == uuid.UUID(repo_id),
+                    Repository.tenant_id == uuid.UUID(tenant_id),
+                    Repository.is_active == True,
+                )
+            )
+            repo = repo_result.scalar_one_or_none()
+            if not repo:
+                raise HTTPException(status_code=404, detail="Repository not found or not active.")
 
-    if not analysis_type:
-        has_context = bool(getattr(repo, "context_summary", None))
-        analysis_type = _derive_analysis_type(changed_files, has_context)
+            if not analysis_type:
+                has_context = bool(getattr(repo, "context_summary", None))
+                analysis_type = _derive_analysis_type(changed_files, has_context)
 
     # Derive scope_type from analysis_type if not provided
     if not scope_type:

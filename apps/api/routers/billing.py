@@ -6,6 +6,7 @@ from decimal import Decimal
 
 import structlog
 from fastapi import APIRouter, HTTPException
+from opentelemetry.trace import StatusCode, get_tracer
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 
@@ -17,6 +18,7 @@ from apps.api.models.auth import Tenant
 from apps.api.models.billing import BillingEvent
 
 log = structlog.get_logger(__name__)
+tracer = get_tracer(__name__)
 router = APIRouter()
 
 
@@ -142,15 +144,19 @@ async def create_top_up_session(body: TopUpRequest, current: TenantAdmin) -> Top
     from apps.api.billing.stripe_service import StripeService
     stripe_service = StripeService()
     base = settings.frontend_url.rstrip("/")
-    try:
-        checkout_url = await stripe_service.create_top_up_session(
-            tenant=tenant,
-            amount_usd=Decimal(str(body.amount_usd)),
-            success_url=f"{base}/billing?topup=success",
-            cancel_url=f"{base}/billing?topup=cancelled",
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    with tracer.start_as_current_span("create_top_up_session") as span:
+        try:
+            checkout_url = await stripe_service.create_top_up_session(
+                tenant=tenant,
+                amount_usd=Decimal(str(body.amount_usd)),
+                success_url=f"{base}/billing?topup=success",
+                cancel_url=f"{base}/billing?topup=cancelled",
+            )
+        except ValueError as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
+            log.error("top_up_session_creation_failed", tenant_id=tenant_id, amount=body.amount_usd, exc_info=True)
+            raise HTTPException(status_code=400, detail=str(e)) from e
     return TopUpResponse(checkout_url=checkout_url)
 
 

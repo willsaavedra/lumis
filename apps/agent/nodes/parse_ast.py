@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import re
 import structlog
+from opentelemetry import trace
+from opentelemetry.trace import StatusCode
 
 from apps.agent.nodes.base import publish_progress, publish_thought
 from apps.agent.schemas import AgentState, CallGraph, CallNode
 
 log = structlog.get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -82,16 +85,21 @@ async def parse_ast_node(state: AgentState) -> dict:
         content = file_info["content"]
         file_obs_imports[file_info["path"]] = _detect_obs_imports(content, language)
 
-        try:
-            nodes = _extract_nodes(file_info["path"], content, language)
-            for node in nodes:
-                call_graph.nodes[f"{file_info['path']}:{node.name}"] = node
-                if node.node_type == "handler":
-                    call_graph.entry_points.append(f"{file_info['path']}:{node.name}")
-                elif node.node_type in ("db_call", "http_client", "cache", "queue"):
-                    call_graph.io_nodes.append(f"{file_info['path']}:{node.name}")
-        except Exception as e:
-            log.warning("ast_parse_failed", file=file_info["path"], error=str(e))
+        with tracer.start_as_current_span("extract_nodes") as span:
+            span.set_attribute("file.path", file_info["path"])
+            span.set_attribute("file.language", language)
+            try:
+                nodes = _extract_nodes(file_info["path"], content, language)
+                for node in nodes:
+                    call_graph.nodes[f"{file_info['path']}:{node.name}"] = node
+                    if node.node_type == "handler":
+                        call_graph.entry_points.append(f"{file_info['path']}:{node.name}")
+                    elif node.node_type in ("db_call", "http_client", "cache", "queue"):
+                        call_graph.io_nodes.append(f"{file_info['path']}:{node.name}")
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(StatusCode.ERROR, str(exc))
+                log.warning("ast_parse_failed", file=file_info["path"], error=str(exc), exc_info=True)
 
     # Second pass: populate directed call graph edges (callers / callees)
     # For each node, scan its function body for calls to other known functions

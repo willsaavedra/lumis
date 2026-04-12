@@ -8,6 +8,8 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
+from opentelemetry import trace
+from opentelemetry.trace import StatusCode
 
 from apps.api.core.database import get_session_with_tenant
 from apps.api.core.deps import CurrentUser
@@ -17,6 +19,7 @@ from apps.api.scm.repo_web_url import repo_web_url
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
+tracer = trace.get_tracer(__name__)
 
 
 class RepoResponse(BaseModel):
@@ -348,25 +351,28 @@ async def list_repo_refs(repo_id: str, current: CurrentUser) -> dict:
     if not connection:
         return {"branches": [repo.default_branch], "tags": []}
 
-    try:
-        from apps.api.core.security import decrypt_scm_token
-        from apps.api.scm.github import GitHubAdapter
-        from apps.api.scm import gitlab as gitlab_scm
-        from apps.api.scm import bitbucket as bitbucket_scm
+    with tracer.start_as_current_span("list_repo_refs") as span:
+        try:
+            from apps.api.core.security import decrypt_scm_token
+            from apps.api.scm.github import GitHubAdapter
+            from apps.api.scm import gitlab as gitlab_scm
+            from apps.api.scm import bitbucket as bitbucket_scm
 
-        if connection.scm_type == "github" and connection.installation_id:
-            adapter = GitHubAdapter()
-            return await adapter.list_refs(connection.installation_id, repo.full_name)
-        if connection.scm_type == "gitlab":
-            token = decrypt_scm_token(connection.encrypted_token)
-            if token:
-                return await gitlab_scm.list_refs(token, repo.full_name)
-        if connection.scm_type == "bitbucket":
-            token = decrypt_scm_token(connection.encrypted_token)
-            if token:
-                return await bitbucket_scm.list_refs(token, repo.full_name)
-    except Exception as e:
-        log.warning("list_refs_failed", repo=repo.full_name, error=str(e))
+            if connection.scm_type == "github" and connection.installation_id:
+                adapter = GitHubAdapter()
+                return await adapter.list_refs(connection.installation_id, repo.full_name)
+            if connection.scm_type == "gitlab":
+                token = decrypt_scm_token(connection.encrypted_token)
+                if token:
+                    return await gitlab_scm.list_refs(token, repo.full_name)
+            if connection.scm_type == "bitbucket":
+                token = decrypt_scm_token(connection.encrypted_token)
+                if token:
+                    return await bitbucket_scm.list_refs(token, repo.full_name)
+        except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
+            log.error("list_refs_failed", repo=repo.full_name, error=str(e), exc_info=True)
     return {"branches": [repo.default_branch], "tags": []}
 
 

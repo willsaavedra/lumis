@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timezone
 
 import structlog
+from opentelemetry.trace import StatusCode
 
 from apps.agent.schemas import AgentState
 

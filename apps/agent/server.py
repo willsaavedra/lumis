@@ -17,8 +17,11 @@ import structlog
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
+from opentelemetry.trace import StatusCode
+from opentelemetry import trace
 
 log = structlog.get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 app = FastAPI(title="Horion Agent", version="0.1.0")
 
@@ -38,10 +41,14 @@ async def trigger_analysis(job_id: str) -> JSONResponse:
     from apps.agent.graph import run_analysis_graph
 
     async def _run() -> None:
-        try:
-            await run_analysis_graph(job_id)
-        except Exception:
-            log.exception("run_analysis_graph_task_failed", job_id=job_id)
+        with tracer.start_as_current_span("run_analysis_graph_task") as span:
+            span.set_attribute("job_id", job_id)
+            try:
+                await run_analysis_graph(job_id)
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(StatusCode.ERROR, str(exc))
+                log.error("run_analysis_graph_task_failed", job_id=job_id, exc_info=True)
 
     asyncio.create_task(_run())
     return JSONResponse({"status": "started", "job_id": job_id}, status_code=202)

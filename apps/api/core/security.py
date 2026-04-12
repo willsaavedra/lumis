@@ -10,10 +10,13 @@ from datetime import datetime, timedelta, timezone
 import structlog
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from opentelemetry import trace
+from opentelemetry.trace import StatusCode
 
 from apps.api.core.config import settings
 
 log = structlog.get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -73,10 +76,14 @@ def create_state_token(tenant_id: str, user_id: str) -> str:
 
 
 def decode_state_token(token: str) -> dict:
-    try:
-        return jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
-    except JWTError as e:
-        raise ValueError(f"Invalid state token: {e}") from e
+    with tracer.start_as_current_span("decode_state_token") as span:
+        try:
+            return jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
+        except JWTError as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
+            log.error("jwt_decode_failed", exc_info=True)
+            raise ValueError(f"Invalid state token: {e}") from e
 
 
 def verify_hmac_signature(payload: bytes, signature: str, secret: str) -> bool:
@@ -102,7 +109,11 @@ def encrypt_scm_token(plaintext: str) -> bytes:
 def decrypt_scm_token(blob: bytes | None) -> str | None:
     if not blob:
         return None
-    try:
-        return _scm_fernet().decrypt(blob).decode()
-    except Exception:
-        return None
+    with tracer.start_as_current_span("decrypt_scm_token") as span:
+        try:
+            return _scm_fernet().decrypt(blob).decode()
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(StatusCode.ERROR, str(exc))
+            log.error("scm_token_decrypt_failed", exc_info=True)
+            return None

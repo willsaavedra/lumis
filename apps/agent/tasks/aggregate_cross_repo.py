@@ -13,6 +13,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
 import structlog
+from opentelemetry.trace import StatusCode
 
 from apps.worker.celery_app import celery_app
 from apps.agent.tasks.rag_shared import (

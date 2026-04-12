@@ -10,10 +10,13 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 from sqlalchemy.sql import text
+from opentelemetry import trace
+from opentelemetry.trace import StatusCode
 
 from apps.api.core.config import settings
 
 log = structlog.get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 engine = create_async_engine(
     settings.database_url,
@@ -42,7 +45,11 @@ async def get_session_with_tenant(tenant_id: str) -> AsyncGenerator[AsyncSession
         try:
             yield session
             await session.commit()
-        except Exception:
+        except Exception as exc:
+            with tracer.start_as_current_span("session_rollback") as span:
+                span.record_exception(exc)
+                span.set_status(StatusCode.ERROR, str(exc))
+                log.error("session_rollback_failed", tenant_id=tenant_id, exc_info=True)
             await session.rollback()
             raise
 
@@ -63,7 +70,11 @@ async def get_db_no_rls() -> AsyncGenerator[AsyncSession, None]:
         try:
             yield session
             await session.commit()
-        except Exception:
+        except Exception as exc:
+            with tracer.start_as_current_span("session_rollback") as span:
+                span.record_exception(exc)
+                span.set_status(StatusCode.ERROR, str(exc))
+                log.error("session_rollback_failed", exc_info=True)
             await session.rollback()
             raise
 
@@ -78,6 +89,10 @@ async def db_session_no_rls():
         try:
             yield session
             await session.commit()
-        except Exception:
+        except Exception as exc:
+            with tracer.start_as_current_span("session_rollback") as span:
+                span.record_exception(exc)
+                span.set_status(StatusCode.ERROR, str(exc))
+                log.error("session_rollback_failed", exc_info=True)
             await session.rollback()
             raise

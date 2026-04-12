@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import structlog
+from opentelemetry import trace
 
 from apps.agent.nodes.base import publish_progress, publish_thought
 from apps.agent.schemas import AgentState
@@ -65,8 +66,10 @@ async def deduplicate_node(state: AgentState) -> dict:
             f_line = finding.get("line_start")
             if f_line and (f_path, f_line) in suppression_set:
                 suppressed_count += 1
+                ctx = trace.get_current_span().get_span_context()
                 log.info(
                     "finding_suppressed_by_lumis_ignore",
+                    trace_id=format(ctx.trace_id, "032x"),
                     file_path=f_path,
                     line=f_line,
                     title=finding.get("title"),

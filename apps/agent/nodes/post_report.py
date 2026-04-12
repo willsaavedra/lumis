@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 import structlog
+from opentelemetry.trace import StatusCode
 
 from apps.agent.nodes.base import (
     publish_analysis_event,
@@ -237,7 +238,11 @@ async def _save_to_db(
         ingest_analysis_history.delay(job_id)
         log.info("ingest_history_enqueued", job_id=job_id)
     except Exception as e:
-        log.warning("ingest_history_enqueue_failed", job_id=job_id, error=str(e))
+        from opentelemetry import trace
+        span = trace.get_current_span()
+        span.record_exception(e)
+        span.set_status(StatusCode.ERROR, str(e))
+        log.error("ingest_history_enqueue_failed", job_id=job_id, error=str(e), exc_info=True)
 
 
 async def _post_pr_comment(request: dict, findings: list[dict], scores: dict) -> None:

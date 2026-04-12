@@ -6,6 +6,7 @@ from decimal import Decimal
 import structlog
 import stripe
 from stripe import StripeClient
+from opentelemetry.trace import StatusCode
 
 from apps.api.core.config import settings
 
@@ -85,6 +86,10 @@ class StripeService:
             try:
                 stripe.Subscription.modify(existing_sub_id, metadata=meta)
             except Exception as e:
+                from opentelemetry import trace
+                span = trace.get_current_span()
+                span.record_exception(e)
+                span.set_status(StatusCode.ERROR, str(e))
                 log.warning("stripe_subscription_metadata_update_failed",
                             subscription_id=existing_sub_id, error=str(e))
 

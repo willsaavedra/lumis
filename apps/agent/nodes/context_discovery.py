@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 import structlog
+from opentelemetry.trace import StatusCode
 
 from apps.agent.nodes.base import publish_progress
 from apps.agent.schemas import AgentState

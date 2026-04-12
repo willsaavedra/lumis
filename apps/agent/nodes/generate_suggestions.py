@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import time
 import structlog
+from opentelemetry.trace import StatusCode
 
 from apps.agent.nodes.base import publish_progress, publish_llm_call_started, log_llm_call, publish_thought, publish_cost_update
 from apps.agent.nodes.instrumentation_hints import constraint_section
@@ -90,8 +91,12 @@ async def generate_suggestions_node(state: AgentState) -> dict:
                         else:
                             f["suggestion"] = result
                         break
-        except Exception as e:
-            log.warning("suggestion_generation_failed", error=str(e))
+        except Exception as exc:
+            from opentelemetry import trace
+            span = trace.get_current_span()
+            span.record_exception(exc)
+            span.set_status(StatusCode.ERROR, str(exc))
+            log.error("suggestion_generation_failed", error=str(exc), exc_info=True)
 
     await publish_thought(
         state, "generate_suggestions",

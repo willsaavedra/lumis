@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timezone
 
 import structlog
+from opentelemetry.trace import StatusCode
 
 from apps.worker.celery_app import celery_app
 
