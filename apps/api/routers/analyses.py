@@ -21,6 +21,7 @@ from apps.api.models.analysis import AnalysisJob, AnalysisResult, Finding, Findi
 from apps.api.models.scm import Repository
 from apps.api.models.tag_system import AnalysisTag
 from apps.api.scm.repo_web_url import repo_web_url as build_repo_web_url
+from apps.api.services.tag_filter import parse_tag_filter, tag_filter_exists_clauses
 from apps.api.services.tag_access import assert_repo_accessible, effective_tag_ids_for_user, repository_visible_predicate
 
 log = structlog.get_logger(__name__)
@@ -407,38 +408,22 @@ def _apply_analysis_list_filters(
     tenant_id: str,
     *,
     status: str | None,
-    trigger: str | None,
-    analysis_type: str | None,
-    repo_id: str | None,
-    q: str | None,
     fix_pr: str | None,
-) -> tuple[list, bool]:
-    """Build shared WHERE fragments for list + count. Returns (conditions, need_repo_join)."""
-    tenant_uuid = uuid.UUID(tenant_id)
+    tags: str | None,
+) -> list:
+    """Build shared WHERE fragments for list + count."""
+    tid = uuid.UUID(tenant_id)
     stale_cutoff = datetime.now(timezone.utc) - _FIX_PR_ENQUEUE_TTL
     conditions: list = [
-        AnalysisJob.tenant_id == tenant_uuid,
+        AnalysisJob.tenant_id == tid,
         AnalysisJob.analysis_type != "context",
     ]
-    need_repo_join = False
 
     if status:
         allowed_s = {"pending", "running", "completed", "failed"}
         parts = [s.strip() for s in status.split(",") if s.strip() in allowed_s]
         if parts:
             conditions.append(AnalysisJob.status.in_(parts))
-    if trigger:
-        conditions.append(AnalysisJob.trigger == trigger)
-    if analysis_type:
-        conditions.append(AnalysisJob.analysis_type == analysis_type)
-    if repo_id:
-        try:
-            conditions.append(AnalysisJob.repo_id == uuid.UUID(repo_id))
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail="Invalid repo_id.") from e
-    if q and q.strip():
-        need_repo_join = True
-        conditions.append(Repository.full_name.ilike(f"%{q.strip()}%"))
 
     if fix_pr == "has_pr":
         conditions.append(AnalysisJob.fix_pr_url.isnot(None))
@@ -468,7 +453,11 @@ def _apply_analysis_list_filters(
         )
         conditions.append(actionable_exists)
 
-    return conditions, need_repo_join
+    tag_pairs = parse_tag_filter(tags)
+    for clause in tag_filter_exists_clauses(tag_pairs, tid):
+        conditions.append(clause)
+
+    return conditions
 
 
 @router.get("", response_model=AnalysisListResponse)
@@ -479,13 +468,8 @@ async def list_analyses(
     sort: str = Query("created_at"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     status: str | None = Query(None, description="Comma-separated: pending,running,completed,failed"),
-    trigger: str | None = Query(None),
-    analysis_type: str | None = Query(None),
-    repo_id: str | None = Query(None),
-    q: str | None = Query(None, max_length=200),
     fix_pr: str | None = Query(None),
-    tag_key: str | None = Query(None),
-    tag_value: str | None = Query(None),
+    tags: str | None = Query(None, description="Comma-separated key:value pairs, e.g. team:backend,trigger:push"),
 ) -> AnalysisListResponse:
     user, tenant_id, membership_role = current
     if sort not in _SORTABLE:
@@ -493,17 +477,13 @@ async def list_analyses(
     if fix_pr is not None and fix_pr not in ("has_pr", "generating", "can_suggest"):
         raise HTTPException(status_code=400, detail="fix_pr must be has_pr, generating, or can_suggest.")
 
-    conditions, need_repo_join = _apply_analysis_list_filters(
+    conditions = _apply_analysis_list_filters(
         tenant_id,
         status=status,
-        trigger=trigger,
-        analysis_type=analysis_type,
-        repo_id=repo_id,
-        q=q,
         fix_pr=fix_pr,
+        tags=tags,
     )
-    if sort == "repo":
-        need_repo_join = True
+    need_repo_join = sort == "repo"
 
     tid = uuid.UUID(tenant_id)
     async with get_session_with_tenant(tenant_id) as session:
@@ -517,18 +497,6 @@ async def list_analyses(
         if vis_pred is not None:
             conditions.append(vis_pred)
             need_repo_join = True
-        if tag_key and tag_value and tag_key.strip() and tag_value.strip():
-            conditions.append(
-                exists(
-                    select(1)
-                    .select_from(AnalysisTag)
-                    .where(
-                        AnalysisTag.job_id == AnalysisJob.id,
-                        AnalysisTag.key == tag_key.strip(),
-                        AnalysisTag.value == tag_value.strip(),
-                    )
-                )
-            )
 
     def _base_select_from():
         f = select(AnalysisJob).where(*conditions)

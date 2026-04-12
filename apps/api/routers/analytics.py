@@ -14,46 +14,10 @@ from apps.api.core.database import get_session_with_tenant
 from apps.api.core.deps import CurrentUser
 from apps.api.models.analysis import AnalysisJob, AnalysisResult, Finding
 from apps.api.models.tag_system import AnalysisTag
+from apps.api.services.tag_filter import parse_tag_filter as _parse_tag_filter, tag_filter_exists_clauses as _tag_filter_exists
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
-
-
-# ── Helpers ─────────────────────────────────────────────────────────────
-
-def _parse_tag_filter(tags_raw: str | None) -> list[tuple[str, str]]:
-    """Parse '?tags=team:payments,env:production' into list of (key, value)."""
-    if not tags_raw or not tags_raw.strip():
-        return []
-    pairs: list[tuple[str, str]] = []
-    for token in tags_raw.split(","):
-        token = token.strip()
-        if ":" not in token:
-            continue
-        k, v = token.split(":", 1)
-        k, v = k.strip(), v.strip()
-        if k and v:
-            pairs.append((k, v))
-    return pairs
-
-
-def _tag_filter_exists(tag_pairs: list[tuple[str, str]], tid: uuid.UUID):
-    """Build AND EXISTS clauses on analysis_tags for each tag pair."""
-    conditions = []
-    for k, v in tag_pairs:
-        conditions.append(
-            AnalysisTag.job_id == AnalysisJob.id
-        )
-    clauses = []
-    for k, v in tag_pairs:
-        sub = select(AnalysisTag.id).where(
-            AnalysisTag.job_id == AnalysisJob.id,
-            AnalysisTag.tenant_id == tid,
-            AnalysisTag.key == k,
-            AnalysisTag.value == v,
-        ).correlate(AnalysisJob).exists()
-        clauses.append(sub)
-    return clauses
 
 
 def _period_range(period: str) -> tuple[datetime, datetime, datetime, datetime]:
