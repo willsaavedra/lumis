@@ -164,6 +164,19 @@ async def delete_expired_chunks() -> int:
         return result.rowcount
 
 
+async def delete_repo_source_chunks(repo_id: str, source_type: str) -> int:
+    """Remove all chunks of a given source_type for a specific repo (used before snapshot re-ingestion)."""
+    from sqlalchemy import text
+    from apps.api.core.database import AsyncSessionFactory
+
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(text(
+            "DELETE FROM knowledge_chunks WHERE repo_id = :repo_id AND source_type = :source_type"
+        ), {"repo_id": repo_id, "source_type": source_type})
+        await session.commit()
+        return result.rowcount
+
+
 async def delete_tenant_source_chunks(tenant_id: str, source_type: str) -> int:
     """Remove all chunks of a given source_type for a tenant (used before re-ingestion)."""
     from sqlalchemy import text

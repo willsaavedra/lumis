@@ -45,6 +45,8 @@ class ChangedFile:
     language: str | None = None
     relevance_score: int = 0  # 0=irrelevant, 1=low, 2=high (set by pre_triage)
     content: str | None = None
+    domain: str | None = None
+    file_role: str | None = None
 
 
 @dataclass
@@ -180,3 +182,5 @@ class AgentState(TypedDict):
     crossrun_summary: dict | None
     rag_context: str | None
     analysis_manifest: dict | None
+    expansion_requested: list[str] | None
+    expansion_count: int

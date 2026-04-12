@@ -13,6 +13,7 @@ from apps.agent.nodes.diff_crossrun import diff_crossrun_node
 from apps.agent.nodes.score import score_node
 from apps.agent.nodes.generate_suggestions import generate_suggestions_node
 from apps.agent.nodes.post_report import post_report_node
+from apps.agent.nodes.expand_context import expand_context_node
 
 __all__ = [
     "clone_repo_node",
@@ -29,4 +30,5 @@ __all__ = [
     "score_node",
     "generate_suggestions_node",
     "post_report_node",
+    "expand_context_node",
 ]

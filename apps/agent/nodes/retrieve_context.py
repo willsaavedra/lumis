@@ -77,17 +77,39 @@ async def _retrieve(state: AgentState) -> str | None:
     embeddings = await embed_texts(queries)
     query_embeddings = list(zip(queries, embeddings))
 
-    # Dual retrieval: global (tenant_id=NULL) + tenant-specific in parallel
-    global_task = asyncio.create_task(
-        _search_index(query_embeddings, tenant_id=None, language=_primary_language(state))
-    )
-    tenant_task = asyncio.create_task(
-        _search_index(query_embeddings, tenant_id=tenant_id, language=_primary_language(state))
-    ) if tenant_id else asyncio.create_task(asyncio.coroutine(lambda: [])())
+    async def _empty() -> list:
+        return []
 
-    global_chunks, tenant_chunks = await asyncio.gather(global_task, tenant_task)
+    lang = _primary_language(state)
 
-    all_chunks = global_chunks + tenant_chunks
+    # Split queries: history-specific (no language filter) vs general (with language filter)
+    history_qe = [(q, e) for q, e in query_embeddings if "previous findings" in q]
+    general_qe = [(q, e) for q, e in query_embeddings if "previous findings" not in q]
+
+    tasks = []
+    # General queries — with language filter
+    if general_qe:
+        tasks.append(asyncio.create_task(
+            _search_index(general_qe, tenant_id=None, language=lang)
+        ))
+        tasks.append(
+            asyncio.create_task(_search_index(general_qe, tenant_id=tenant_id, language=lang))
+            if tenant_id else asyncio.create_task(_empty())
+        )
+    # History queries — no language filter to avoid hiding repo-specific history
+    if history_qe:
+        tasks.append(asyncio.create_task(
+            _search_index(history_qe, tenant_id=None, language=None)
+        ))
+        tasks.append(
+            asyncio.create_task(_search_index(history_qe, tenant_id=tenant_id, language=None))
+            if tenant_id else asyncio.create_task(_empty())
+        )
+
+    results = await asyncio.gather(*tasks) if tasks else []
+    all_chunks: list[dict] = []
+    for chunk_list in results:
+        all_chunks.extend(chunk_list)
 
     if not all_chunks:
         return None
@@ -103,6 +125,7 @@ def _build_queries(state: AgentState) -> list[str]:
     Build semantic queries from the analysis context.
     Query types: language+pattern, tenant standards, file triage (when files in scope),
     file-specific history.
+    For quick runs, only file-specific history queries are generated.
     """
     queries: list[str] = []
     lang = _primary_language(state)
@@ -111,6 +134,16 @@ def _build_queries(state: AgentState) -> list[str]:
     tenant_id = state.get("tenant_id", "")
     repo_context = state.get("repo_context") or {}
     instrumentation = repo_context.get("instrumentation")
+    analysis_type = request.get("analysis_type")
+
+    # Quick runs: only file-specific history queries (no generic best-practice queries)
+    if analysis_type == "quick":
+        changed_files = state.get("changed_files", [])
+        for f in changed_files[:5]:
+            file_path = f.get("path", "")
+            if file_path and repo_id:
+                queries.append(f"previous findings {repo_id} {file_path}")
+        return queries
 
     # 1. Language + observability pattern queries
     if lang:
@@ -135,14 +168,21 @@ def _build_queries(state: AgentState) -> list[str]:
             "application code vs tests vs configuration"
         )
 
-    # 4. File-specific history for changed files
-    high_relevance = [f for f in changed_files if f.get("relevance_score", 0) >= 2][:3]
+    # 4. File-specific history for changed files, enriched with framework/domain
+    high_relevance = [f for f in changed_files if f.get("relevance_score", 0) >= 2][:5]
     for f in high_relevance:
         file_path = f.get("path", "")
+        file_lang = f.get("language", lang or "")
+        framework = f.get("framework", "")
+        domain = f.get("domain", "")
         if file_path and repo_id:
             queries.append(f"previous findings {repo_id} {file_path}")
+            if framework:
+                queries.append(f"{file_lang} {framework} observability missing instrumentation")
+        if file_lang and domain:
+            queries.append(f"{file_lang} {domain} error handling tracing span gap")
 
-    return queries[:10]  # cap at 10 queries
+    return queries[:12]  # cap at 12 queries
 
 
 async def _search_index(
@@ -213,12 +253,14 @@ async def _search_index(
                 key = row.content[:100]
                 if key not in seen_content:
                     seen_content.add(key)
+                    meta = row.metadata if hasattr(row, "metadata") else None
                     results.append({
                         "content": row.content,
                         "source_type": row.source_type,
                         "language": row.language,
                         "pillar": row.pillar,
                         "similarity": sim,
+                        "metadata": meta,
                     })
 
     return results
@@ -228,11 +270,24 @@ def _rerank(chunks: list[dict]) -> list[dict]:
     """
     Sort chunks by similarity descending.
     Tenant-specific chunks get a small relevance boost to prioritize custom standards.
+    Recent chunks get a temporal boost (up to +0.03 for chunks < 30 days old).
     """
+    from datetime import datetime as _dt
+
     def _score(chunk: dict) -> float:
         sim = chunk["similarity"]
-        if chunk["source_type"] in ("tenant_standards", "analysis_history", "cross_repo_pattern"):
-            sim += 0.05  # small boost for tenant-specific knowledge
+        if chunk["source_type"] in ("tenant_standards", "analysis_history", "cross_repo_pattern", "findings_snapshot"):
+            sim += 0.05
+        # Temporal boost for recent findings
+        meta = chunk.get("metadata") or {}
+        ts = meta.get("confirmed_at") or meta.get("snapshot_at")
+        if ts:
+            try:
+                from dateutil.parser import parse as _parse_dt
+                days_old = (_dt.utcnow() - _parse_dt(ts).replace(tzinfo=None)).days
+                sim += max(0.0, 0.03 * (1 - days_old / 30))
+            except Exception:
+                pass
         return sim
 
     return sorted(chunks, key=_score, reverse=True)
@@ -248,6 +303,7 @@ def _format_rag_context(chunks: list[dict], state: AgentState) -> str:
         "Datadog Reference (global)": [],
         "Tenant Standards": [],
         "Previous Findings (confirmed)": [],
+        "Previous Findings (unconfirmed)": [],
         "Cross-repo Patterns": [],
     }
 
@@ -256,6 +312,7 @@ def _format_rag_context(chunks: list[dict], state: AgentState) -> str:
         "dd_docs": "Datadog Reference (global)",
         "tenant_standards": "Tenant Standards",
         "analysis_history": "Previous Findings (confirmed)",
+        "findings_snapshot": "Previous Findings (unconfirmed)",
         "cross_repo_pattern": "Cross-repo Patterns",
     }
 

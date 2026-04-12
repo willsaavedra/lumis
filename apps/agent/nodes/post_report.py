@@ -273,6 +273,13 @@ async def _save_to_db(
     except Exception as e:
         log.warning("ingest_history_enqueue_failed", job_id=job_id, error=str(e))
 
+    try:
+        from apps.agent.tasks.ingest_findings_snapshot import ingest_findings_snapshot
+        ingest_findings_snapshot.delay(job_id)
+        log.info("ingest_snapshot_enqueued", job_id=job_id)
+    except Exception as e:
+        log.warning("ingest_snapshot_enqueue_failed", job_id=job_id, error=str(e))
+
 
 _LANG_INDICATORS: dict[str, list[str]] = {
     "go": [".go", "go.mod", "go.sum"],

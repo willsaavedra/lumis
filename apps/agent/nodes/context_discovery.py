@@ -111,6 +111,8 @@ async def context_discovery_node(state: AgentState) -> dict:
     context_files = _collect_context_files(repo)
     detected_languages = _detect_languages(repo)
 
+    file_tree = _build_file_tree(repo)
+
     await publish_progress(state, "discovering", 50, "Analyzing repository context...")
 
     try:
@@ -119,10 +121,16 @@ async def context_discovery_node(state: AgentState) -> dict:
         log.error("context_discovery_llm_failed", job_id=state["job_id"], error=str(e))
         summary = None
 
+    app_map: dict | None = None
+    try:
+        app_map = await _generate_app_map(state, context_files, file_tree)
+    except Exception as e:
+        log.error("context_discovery_app_map_failed", job_id=state["job_id"], error=str(e))
+
     await publish_progress(state, "discovering", 85, "Saving context...")
 
-    if summary or detected_languages:
-        await _save_context_summary(state["job_id"], state["tenant_id"], summary, detected_languages)
+    if summary or detected_languages or app_map:
+        await _save_context_summary(state["job_id"], state["tenant_id"], summary, detected_languages, app_map=app_map)
 
     # Cleanup
     shutil.rmtree(repo_path, ignore_errors=True)
@@ -176,7 +184,95 @@ Key files:
     return resp.text
 
 
-async def _save_context_summary(job_id: str, tenant_id: str, summary: str | None, detected_languages: list[str]) -> None:
+async def _generate_app_map(state: AgentState, context_files: dict[str, str], file_tree: str) -> dict | None:
+    """Generate a structured application map from the repo's file tree and key files."""
+    import json as _json
+    from apps.agent.core.config import settings
+    from apps.agent.llm.chat_completion import chat_complete
+
+    provider = state.get("request", {}).get("llm_provider", "anthropic")
+    if provider == "cerebra_ai":
+        model = settings.cerebra_ai_model_triage
+    else:
+        model = settings.anthropic_model_triage
+
+    files_section = "\n\n".join(
+        f"### {name}\n```\n{content[:3000]}\n```"
+        for name, content in list(context_files.items())[:6]
+    )
+
+    request = state.get("request", {})
+    repo_full_name = request.get("repo_full_name", "unknown")
+
+    system = "You are a software architect. Respond with valid JSON only, no markdown fences."
+    user_prompt = f"""Analyze the file tree and key files of this repository and produce a structured application map as JSON.
+
+Repository: {repo_full_name}
+
+File tree (up to 80 entries):
+{file_tree}
+
+Key files:
+{files_section if files_section else "(no key files)"}
+
+Return this exact JSON structure:
+{{
+  "domains": [
+    {{
+      "name": "short domain name (e.g. payments, auth, notifications)",
+      "files": ["list of file paths belonging to this domain (up to 5)"],
+      "criticality": "critical|high|standard|low",
+      "description": "One sentence describing what this domain does"
+    }}
+  ],
+  "external_dependencies": ["list of external services: databases, APIs, queues, caches"],
+  "entry_points": ["directories or files that serve as entry points (handlers, cmd/, main)"],
+  "architecture_type": "REST API monolith|microservice|worker|CLI|library|IaC|monorepo|other"
+}}
+
+Rules:
+- Identify 2-6 logical domains from directory structure and file names
+- For criticality: customer-facing money/auth flows = critical, core business = high, internal = standard, utilities = low
+- Be factual — only report what you can infer from the file tree and contents shown
+- Return ONLY the JSON object"""
+
+    resp = await chat_complete(
+        system=system,
+        user=user_prompt,
+        model=model,
+        max_tokens=2000,
+        provider=provider,
+        base_url=settings.cerebra_ai_base_url,
+        api_key=settings.anthropic_api_key if provider == "anthropic" else settings.cerebra_ai_api_key,
+        temperature=settings.cerebra_ai_temperature if provider == "cerebra_ai" else 0.2,
+        top_p=settings.cerebra_ai_top_p if provider == "cerebra_ai" else 0.9,
+        timeout=settings.cerebra_ai_timeout if provider == "cerebra_ai" else 120,
+    )
+
+    raw = resp.text.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+
+    try:
+        app_map = _json.loads(raw)
+        if isinstance(app_map, dict) and "domains" in app_map:
+            return app_map
+    except Exception as e:
+        log.warning("app_map_parse_failed", error=str(e), raw=raw[:200])
+
+    return None
+
+
+async def _save_context_summary(
+    job_id: str,
+    tenant_id: str,
+    summary: str | None,
+    detected_languages: list[str],
+    *,
+    app_map: dict | None = None,
+) -> None:
     import uuid
     from sqlalchemy import select
     from apps.api.core.database import get_session_with_tenant
@@ -199,9 +295,10 @@ async def _save_context_summary(job_id: str, tenant_id: str, summary: str | None
         if repo:
             if summary:
                 repo.context_summary = summary
+            if app_map:
+                repo.app_map = app_map
             repo.context_updated_at = datetime.now(timezone.utc)
             if detected_languages:
-                # Merge: keep user-set languages + add newly detected ones
                 existing = list(repo.language or [])
                 merged = existing + [l for l in detected_languages if l not in existing]
                 repo.language = merged

@@ -111,6 +111,14 @@ async def parse_ast_node(state: AgentState) -> dict:
     )
     await publish_progress(state, "parsing", 35, f"Found {len(call_graph.nodes)} code nodes.", stage_index=3)
 
+    # For full/repository runs, do a lightweight pass over the entire repo
+    # to build a complete function name index for better call graph edges
+    analysis_type = state.get("request", {}).get("analysis_type", "quick")
+    full_repo_index: dict[str, list[str]] = {}
+    if analysis_type in ("full", "repository") and state.get("repo_path"):
+        full_repo_index = _index_full_repo_topology(state["repo_path"])
+        log.info("full_repo_index_built", functions=sum(len(v) for v in full_repo_index.values()))
+
     summary = generate_call_graph_summary(call_graph)
 
     return {
@@ -131,8 +139,60 @@ async def parse_ast_node(state: AgentState) -> dict:
             "error_paths": call_graph.error_paths,
             "file_obs_imports": file_obs_imports,
             "summary": summary,
+            "full_repo_index": full_repo_index,
         }
     }
+
+
+_EXT_TO_LANG: dict[str, str] = {
+    ".go": "go", ".py": "python", ".ts": "typescript", ".tsx": "typescript",
+    ".js": "javascript", ".jsx": "javascript", ".java": "java",
+}
+
+_FUNC_PATTERNS: dict[str, re.Pattern] = {
+    "go": re.compile(r"func\s+(?:\([^)]+\)\s+)?(\w+)\s*\("),
+    "python": re.compile(r"(?:async\s+)?def\s+(\w+)\s*\("),
+    "typescript": re.compile(r"(?:async\s+)?function\s+(\w+)\s*\(|(?:export\s+)?(?:async\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\("),
+    "javascript": re.compile(r"(?:async\s+)?function\s+(\w+)\s*\(|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\("),
+    "java": re.compile(r"(?:public|private|protected|static)\s+\w+\s+(\w+)\s*\("),
+}
+
+
+def _index_full_repo_topology(repo_path: str) -> dict[str, list[str]]:
+    """
+    Lightweight pass over all repo source files to map function names to file paths.
+    Does NOT create full CallNode objects — only an index for cross-referencing.
+    """
+    from pathlib import Path
+
+    repo = Path(repo_path)
+    skip = {".git", "__pycache__", "node_modules", "vendor", "dist", "build", ".venv", "venv", ".terraform"}
+    index: dict[str, list[str]] = {}
+    files_scanned = 0
+
+    for p in repo.rglob("*"):
+        if not p.is_file() or any(s in p.parts for s in skip):
+            continue
+        lang = _EXT_TO_LANG.get(p.suffix.lower())
+        if not lang:
+            continue
+        pattern = _FUNC_PATTERNS.get(lang)
+        if not pattern:
+            continue
+        try:
+            content = p.read_text(encoding="utf-8", errors="replace")[:8000]
+            rel_path = str(p.relative_to(repo))
+            for m in pattern.finditer(content):
+                name = m.group(1) or (m.group(2) if m.lastindex and m.lastindex >= 2 else None)
+                if name:
+                    index.setdefault(name, []).append(rel_path)
+            files_scanned += 1
+            if files_scanned >= 2000:
+                break
+        except Exception:
+            pass
+
+    return index
 
 
 def _populate_call_edges(call_graph: CallGraph, files: list[dict]) -> None:

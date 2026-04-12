@@ -64,6 +64,7 @@ class Repository(Base):
     # Metadata hints for observability backend (e.g. Datadog tags, Prometheus labels)
     obs_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     context_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    app_map: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Tracks when context_summary was last refreshed; used to auto-enqueue context refresh jobs
     context_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

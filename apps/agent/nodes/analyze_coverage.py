@@ -464,6 +464,35 @@ async def _persist_instrumentation_detection(job_id: str, tenant_id: str, vendor
         log.warning("instrumentation_persist_failed", job_id=job_id, error=str(exc))
 
 
+def _file_context_header(file_info: dict, call_graph: dict) -> str:
+    """Build a compact context string showing callers/callees from the call graph."""
+    path = file_info.get("path", "")
+    nodes = call_graph.get("nodes", {})
+    if not nodes:
+        return ""
+
+    callers: set[str] = set()
+    callees: set[str] = set()
+    for _k, n in nodes.items():
+        if n.get("file_path") != path:
+            continue
+        for ck in n.get("callers", []):
+            cn = nodes.get(ck)
+            if cn and cn["file_path"] != path:
+                callers.add(cn["file_path"])
+        for ck in n.get("callees", []):
+            cn = nodes.get(ck)
+            if cn and cn["file_path"] != path:
+                callees.add(cn["file_path"])
+
+    parts: list[str] = []
+    if callers:
+        parts.append(f"Called by: {', '.join(sorted(callers)[:3])}")
+    if callees:
+        parts.append(f"Calls: {', '.join(sorted(callees)[:3])}")
+    return " | ".join(parts)
+
+
 async def analyze_coverage_node(state: AgentState) -> dict:
     """
     Analyze observability coverage.
@@ -852,11 +881,25 @@ async def analyze_coverage_node(state: AgentState) -> dict:
         state, "analyzing", 60, f"Found {len(findings)} initial findings.",
         stage_index=5, files_analyzed=len(capped),
     )
-    return {
+
+    result: dict = {
         "findings": findings,
         "coverage_map": coverage_map,
         "analysis_manifest": manifest.to_completeness_report() if capped else None,
     }
+
+    # Propagate autonomous expansion requests from LLM output
+    expansion_files: list[str] = []
+    for f in findings:
+        more = f.pop("needs_more_context", None)
+        if isinstance(more, list):
+            expansion_files.extend(more)
+    if expansion_files and state.get("expansion_count", 0) < 1:
+        unique = list(dict.fromkeys(expansion_files))[:5]
+        result["expansion_requested"] = unique
+        log.info("llm_requested_expansion", files=unique, job_id=state.get("job_id"))
+
+    return result
 
 
 async def _llm_analyze_coverage(
@@ -898,9 +941,10 @@ async def _llm_analyze_coverage(
         job_id=state.get("job_id"),
     )
 
-    # Build file summaries
+    # Build file summaries with per-file context headers
     detected_langs: set[str] = set()
     file_summaries = []
+    _cg = state.get("call_graph") or {}
     for f in files:
         content = (f.get("content") or "")[:content_chars]
         lang = f.get("language", "")
@@ -911,6 +955,14 @@ async def _llm_analyze_coverage(
         header = f"File: {f['path']} | Language: {lang} | Obs-imports: {obs_import}"
         if framework:
             header += f" | Framework: {framework}"
+        if f.get("domain"):
+            header += f" | Domain: {f['domain']}"
+        if f.get("file_role"):
+            header += f" | Role: {f['file_role']}"
+        # Add call graph edges for this file
+        file_ctx = _file_context_header(f, _cg)
+        if file_ctx:
+            header += f" | {file_ctx}"
         if f.get("_is_chunk"):
             header += f" | CHUNK {f['_chunk_index'] + 1}/{f['_chunk_total']} (analyze only functions shown in full)"
         file_summaries.append(f"{header}\n```{lang}\n{content}\n```")
@@ -1001,6 +1053,40 @@ async def _llm_analyze_coverage(
     if context_summary:
         context_header += f"\n\nRepository context (from README/docs):\n{context_summary[:1500]}"
 
+    # Inject crossrun_summary and persisting findings from previous run
+    crossrun = state.get("crossrun_summary") or {}
+    if crossrun and crossrun.get("previous_job_id"):
+        persisting = crossrun.get("persisting_count", 0)
+        new_c = crossrun.get("new_count", 0)
+        resolved = crossrun.get("resolved_count", 0)
+        prev_score = crossrun.get("previous_score_global")
+        delta = crossrun.get("score_delta")
+        context_header += (
+            f"\n\nPrevious analysis context:"
+            f"\n- Previous score: {prev_score}"
+            + (f" (delta: {delta:+d})" if delta is not None else "")
+            + f"\n- {new_c} new issues, {persisting} persisting, {resolved} resolved"
+        )
+        persisting_findings = [
+            f for f in state.get("findings", [])
+            if f.get("crossrun_status") == "persisting"
+        ][:8]
+        if persisting_findings:
+            titles = "\n".join(f"  \u2022 [{f['severity']}] {f['title']}" for f in persisting_findings)
+            context_header += f"\n\nStill-open findings from previous run (do NOT re-introduce as new):\n{titles}"
+
+    # Inject repo tags
+    tags = ctx.get("tags") or []
+    if tags:
+        tag_str = " | ".join(f"{t['key']}:{t['value']}" for t in tags)
+        context_header += f"\nRepository tags: {tag_str}"
+
+    # Inject user-provided answers from pre-analysis questions
+    user_answers = state.get("request", {}).get("user_answers") or {}
+    if user_answers:
+        ans_lines = "\n".join(f"  - {k}: {v}" for k, v in user_answers.items())
+        context_header += f"\n\nUser-provided context (trust these answers):\n{ans_lines}"
+
     # Language-specific detection hints for files in this batch
     lang_hints_parts: list[str] = []
     for lang in sorted(detected_langs):
@@ -1011,6 +1097,20 @@ async def _llm_analyze_coverage(
     if lang_hints_parts:
         lang_hints_section = "\n\nLanguage-specific detection checklist:\n" + "\n\n".join(lang_hints_parts)
 
+    # Inject application architecture context from the app_map
+    app_map = ctx.get("app_map") or {}
+    app_map_section = ""
+    if app_map:
+        domains = app_map.get("domains", [])
+        ext_deps = ", ".join(app_map.get("external_dependencies", []))
+        arch = app_map.get("architecture_type", "")
+        app_map_section = f"\n\n## Application Architecture\nType: {arch}\nExternal dependencies: {ext_deps}"
+        for d in domains[:6]:
+            crit = d.get("criticality", "")
+            app_map_section += f"\n- Domain [{crit}] {d['name']}: {d.get('description', '')}"
+            if d.get("files"):
+                app_map_section += f" (files: {', '.join(d['files'][:4])})"
+
     # Inject RAG context from the knowledge base if available
     rag_context = state.get("rag_context") or ""
     rag_section = f"\n\n{rag_context}" if rag_context else ""
@@ -1018,6 +1118,13 @@ async def _llm_analyze_coverage(
     # Inject call graph summary (shared across all batches — cacheable)
     cg_summary = (state.get("call_graph") or {}).get("summary", "")
     call_graph_section = f"\n\n{cg_summary}" if cg_summary else ""
+
+    # Inject suppressed files so LLM knows not to reference them
+    suppressed = state.get("suppressed") or []
+    suppressed_section = ""
+    if suppressed:
+        sup_paths = "\n".join(f"  - {f['file_path']}" for f in suppressed[:20])
+        suppressed_section = f"\n\n## Excluded Files (do NOT reference these)\n{sup_paths}"
 
     # Hard constraint: keep all suggestions aligned with the declared instrumentation / repo type
     instr_constraint = constraint_section(instrumentation, obs_backend)
@@ -1027,7 +1134,7 @@ async def _llm_analyze_coverage(
         language if isinstance(language, list) else ([language] if language else []),
     )
 
-    system_prompt = f"""You are an expert SRE auditing code for observability gaps (prompt version: {PROMPT_VERSION}).{rag_section}{call_graph_section}{iac_constraint}{instr_constraint}
+    system_prompt = f"""You are an expert SRE auditing code for observability gaps (prompt version: {PROMPT_VERSION}).{app_map_section}{rag_section}{call_graph_section}{suppressed_section}{iac_constraint}{instr_constraint}
 
 ## Mandatory Reasoning Framework
 Before reporting ANY finding, internally answer all four questions:
@@ -1078,8 +1185,13 @@ Return a JSON array of findings. Each finding MUST include ALL fields:
   "estimated_monthly_cost_impact": 0.0,
   "suggestion": "Concrete fix using the correct language/paradigm for this file (Terraform vars, HCL data sources, OTel spans, etc.)",
   "code_before": "Exact problematic code extracted from the file (2-8 lines showing the actual issue)",
-  "code_after": "Corrected version of the same code snippet — syntactically valid and production-ready"
+  "code_after": "Corrected version of the same code snippet — syntactically valid and production-ready",
+  "needs_more_context": ["optional: list of file paths you need to see to give a more accurate analysis"]
 }}]
+
+If a file calls functions from other files NOT shown above, and you cannot be certain
+about the finding without seeing that callee, add "needs_more_context" with those
+file paths. Only request files you can infer exist from imports or call patterns.
 
 CRITICAL for code_before / code_after:
 - Extract the REAL lines from the file content shown above — do NOT invent placeholder code

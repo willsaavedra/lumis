@@ -325,6 +325,41 @@ async def cancel_analysis(job_id: str, current: CurrentUser) -> dict:
     return {"status": "cancelled", "job_id": job_id}
 
 
+class SubmitAnswersRequest(BaseModel):
+    answers: dict[str, str]
+
+
+@router.patch("/{job_id}/answers", status_code=status.HTTP_200_OK)
+async def submit_pre_analysis_answers(job_id: str, body: SubmitAnswersRequest, current: CurrentUser) -> dict:
+    """Submit answers to pre-analysis questions and resume the job."""
+    user, tenant_id, _ = current
+
+    async with get_session_with_tenant(tenant_id) as session:
+        result = await session.execute(
+            select(AnalysisJob).where(
+                AnalysisJob.id == uuid.UUID(job_id),
+                AnalysisJob.tenant_id == uuid.UUID(tenant_id),
+            )
+        )
+        job = result.scalar_one_or_none()
+        if not job:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        if job.status != "awaiting_input":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Job is in '{job.status}' state, not awaiting_input",
+            )
+
+        job.user_answers = body.answers
+        job.status = "pending"
+
+    from apps.worker.tasks import run_analysis
+    run_analysis.delay(str(job.id), "")
+
+    log.info("pre_analysis_answers_submitted", job_id=job_id, answer_keys=list(body.answers.keys()))
+    return {"status": "resumed", "job_id": job_id}
+
+
 @router.get("/{job_id}/cost-events")
 async def get_cost_events(
     job_id: str,

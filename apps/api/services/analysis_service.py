@@ -42,6 +42,18 @@ def infer_analysis_type(changed_files_count: int) -> str:
     return "full"
 
 
+async def _has_full_baseline(session: AsyncSession, repo_id: uuid.UUID) -> bool:
+    """True if the repo has at least one completed full/repository analysis."""
+    result = await session.execute(
+        select(AnalysisJob.id).where(
+            AnalysisJob.repo_id == repo_id,
+            AnalysisJob.analysis_type.in_(["full", "repository"]),
+            AnalysisJob.status == "completed",
+        ).limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def enqueue_analysis_from_webhook(
     session: AsyncSession,
     request: AnalysisRequest,
@@ -77,6 +89,13 @@ async def enqueue_analysis_from_webhook(
 
     analysis_type = infer_analysis_type(len(request.changed_files))
     scope_type = "selection" if analysis_type == "quick" else "full_repo"
+
+    if analysis_type == "quick":
+        has_baseline = await _has_full_baseline(session, repo.id)
+        if not has_baseline:
+            analysis_type = "full"
+            scope_type = "full_repo"
+            log.info("quick_upgraded_to_full_no_baseline", repo_id=str(repo.id))
 
     try:
         reservation_token, billing_snapshot = await billing_gate.check_and_reserve(
@@ -274,6 +293,13 @@ async def enqueue_manual_analysis(
             scope_type = "context"
         else:
             scope_type = "full_repo"
+
+    if analysis_type == "quick":
+        has_baseline = await _has_full_baseline(session, repo.id)
+        if not has_baseline:
+            analysis_type = "full"
+            scope_type = "full_repo"
+            log.info("quick_upgraded_to_full_no_baseline", repo_id=repo_id)
 
     if analysis_type == "quick":
         norm = [p.strip() for p in (changed_files or []) if p and str(p).strip()]

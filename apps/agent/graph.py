@@ -26,6 +26,7 @@ from apps.agent.nodes import (
     post_report_node,
 )
 from apps.agent.nodes.analyze_iac import has_iac_files
+from apps.agent.nodes.expand_context import expand_context_node
 
 log = structlog.get_logger(__name__)
 
@@ -40,7 +41,10 @@ def _route_after_clone(state: AgentState) -> str:
 
 
 def _route_after_coverage(state: AgentState) -> str:
-    """Quick skips efficiency scoring — goes straight to deduplicate → score → post_report."""
+    """Quick skips efficiency scoring — goes straight to deduplicate → score → post_report.
+    Also handles autonomous context expansion (max 1 per run)."""
+    if state.get("expansion_requested") and state.get("expansion_count", 0) < 1:
+        return "expand_context"
     analysis_type = state.get("request", {}).get("analysis_type", "full")
     if analysis_type == "quick":
         return "deduplicate"
@@ -50,13 +54,13 @@ def _route_after_coverage(state: AgentState) -> str:
 def _route_after_triage_with_iac(state: AgentState) -> str:
     """
     After triage:
-      - quick → analyze_coverage (skip AST / Datadog / IaC / efficiency)
+      - quick → retrieve_context (limited RAG for history) → analyze_coverage
       - IaC repo or IaC files detected → analyze_iac (runs before/alongside coverage)
       - otherwise → parse_ast (full pipeline)
     """
     analysis_type = state.get("request", {}).get("analysis_type", "full")
     if analysis_type == "quick":
-        return "analyze_coverage"
+        return "retrieve_context"
     if has_iac_files(state):
         return "analyze_iac"
     return "parse_ast"
@@ -81,6 +85,7 @@ def build_graph() -> StateGraph:
     workflow.add_node("score", score_node)
     workflow.add_node("generate_suggestions", generate_suggestions_node)
     workflow.add_node("post_report", post_report_node)
+    workflow.add_node("expand_context", expand_context_node)
 
     # Entry point
     workflow.add_edge(START, "clone_repo")
@@ -95,11 +100,11 @@ def build_graph() -> StateGraph:
     workflow.add_edge("context_discovery", END)
 
     # Branch after triage:
-    #   quick     → analyze_coverage directly (skip AST / DD / RAG for speed)
+    #   quick     → retrieve_context (limited RAG) → analyze_coverage
     #   IaC files → analyze_iac → retrieve_context → analyze_coverage
     #   full/repo → parse_ast → fetch_dd → retrieve_context → analyze_coverage
     workflow.add_conditional_edges("pre_triage", _route_after_triage_with_iac, {
-        "analyze_coverage": "analyze_coverage",   # quick (skips RAG for speed)
+        "retrieve_context": "retrieve_context",   # quick (limited RAG for history)
         "analyze_iac": "analyze_iac",             # IaC-only repos / mixed changesets
         "parse_ast": "parse_ast",                 # full / repository (no IaC)
     })
@@ -113,10 +118,13 @@ def build_graph() -> StateGraph:
     workflow.add_edge("analyze_iac", "retrieve_context")
 
     # Quick skips efficiency but still deduplicates; full/repository run efficiency first
+    # expand_context loops back to analyze_coverage for re-analysis with additional files
     workflow.add_conditional_edges("analyze_coverage", _route_after_coverage, {
         "deduplicate": "deduplicate",                # quick
         "analyze_efficiency": "analyze_efficiency",  # full / repository
+        "expand_context": "expand_context",          # autonomous expansion
     })
+    workflow.add_edge("expand_context", "analyze_coverage")
 
     workflow.add_edge("analyze_efficiency", "deduplicate")
     workflow.add_edge("deduplicate", "diff_crossrun")
@@ -212,6 +220,18 @@ async def run_analysis_graph(job_id: str) -> None:
                 return f"https://bitbucket.org/{fn}.git"
             return f"https://github.com/{fn}.git"
 
+        # Load repo tags for context injection
+        repo_tags_list: list[dict] = []
+        try:
+            from apps.api.models.tag_system import RepoTag
+            async with AsyncSessionFactory() as session:
+                tag_result = await session.execute(
+                    select(RepoTag).where(RepoTag.repo_id == repo.id)
+                )
+                repo_tags_list = [{"key": t.key, "value": t.value} for t in tag_result.scalars().all()]
+        except Exception as e:
+            log.warning("load_repo_tags_failed", job_id=job_id, error=str(e))
+
         repo_context = {
             "repo_type": getattr(repo, "repo_type", None),
             "app_subtype": getattr(repo, "app_subtype", None),
@@ -221,6 +241,8 @@ async def run_analysis_graph(job_id: str) -> None:
             "instrumentation": getattr(repo, "instrumentation", None),
             "obs_metadata": getattr(repo, "obs_metadata", None),
             "context_summary": getattr(repo, "context_summary", None),
+            "app_map": getattr(repo, "app_map", None),
+            "tags": repo_tags_list,
         }
 
         initial_state: AgentState = {
@@ -242,6 +264,7 @@ async def run_analysis_graph(job_id: str) -> None:
                 "installation_id": installation_id,
                 "scm_type": scm_type,
                 "repo_context": repo_context,
+                "user_answers": getattr(job, "user_answers", None) or {},
             },
             "repo_path": None,
             "changed_files": [],
@@ -261,6 +284,8 @@ async def run_analysis_graph(job_id: str) -> None:
             "crossrun_summary": None,
             "rag_context": None,
             "analysis_manifest": None,
+            "expansion_requested": None,
+            "expansion_count": 0,
         }
 
         # Run graph

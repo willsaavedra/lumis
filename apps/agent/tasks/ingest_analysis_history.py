@@ -61,6 +61,16 @@ async def _run(job_id: str) -> dict:
     tenant_id = str(job.tenant_id)
     repo_id = str(job.repo_id)
 
+    # Load the repo language for correct embedding metadata
+    from apps.api.models.scm import Repository
+    repo_language: str | None = None
+    async with AsyncSessionFactory() as session:
+        repo = (await session.execute(
+            select(Repository).where(Repository.id == job.repo_id)
+        )).scalar_one_or_none()
+        if repo and repo.language:
+            repo_language = repo.language[0].lower()
+
     tp_chunks = []
     fp_chunks = []
 
@@ -73,7 +83,7 @@ async def _run(job_id: str) -> dict:
                 "metadata": {
                     "repo_id": repo_id,
                     "file_path": finding.file_path,
-                    "language": None,
+                    "language": repo_language,
                     "pillar": finding.pillar,
                     "finding_type": finding.title[:50],
                     "signal": fb.signal,
@@ -86,6 +96,7 @@ async def _run(job_id: str) -> dict:
                 "metadata": {
                     "repo_id": repo_id,
                     "file_path": finding.file_path,
+                    "language": repo_language,
                     "pillar": finding.pillar,
                     "finding_type": finding.title[:50],
                     "do_not_report": True,
@@ -115,6 +126,7 @@ async def _run(job_id: str) -> dict:
         tenant_id=tenant_id,
         source_type="analysis_history",
         repo_id=repo_id,
+        language=repo_language,
         expires_days=_HISTORY_EXPIRES_DAYS,
     )
 

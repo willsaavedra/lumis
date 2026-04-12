@@ -429,6 +429,38 @@ def _walk_repo_prioritized(repo_root, *, max_files: int) -> list[str]:
     return out
 
 
+_DOMAIN_PATTERNS: dict[str, re.Pattern] = {
+    "payments": re.compile(r"pay(?:ment)?|billing|invoice|checkout|stripe|subscription", re.IGNORECASE),
+    "auth": re.compile(r"auth|login|logout|session|jwt|token|permission|role", re.IGNORECASE),
+    "notifications": re.compile(r"notif|email|sms|push|webhook", re.IGNORECASE),
+    "data": re.compile(r"(?:^|/)(?:db|database|repo(?:sitory)?|store|query|migration)", re.IGNORECASE),
+    "infra": re.compile(r"middleware|config|util|helper|common|shared|base|core", re.IGNORECASE),
+}
+
+_ROLE_PATTERNS: dict[str, re.Pattern] = {
+    "handler": re.compile(r"handler|controller|route|endpoint|view|api", re.IGNORECASE),
+    "service": re.compile(r"service|usecase|business|domain", re.IGNORECASE),
+    "repository": re.compile(r"repo(?:sitory)?|store|dao|query|db", re.IGNORECASE),
+    "worker": re.compile(r"worker|job|task|celery|consumer", re.IGNORECASE),
+    "middleware": re.compile(r"middleware|interceptor|filter|guard", re.IGNORECASE),
+    "model": re.compile(r"model|schema|entity|dto|struct", re.IGNORECASE),
+}
+
+
+def _infer_domain_and_role(file_path: str, app_map: dict | None) -> tuple[str | None, str | None]:
+    """Infer the business domain and architectural role of a file."""
+    if app_map:
+        for domain_entry in app_map.get("domains", []):
+            domain_files = domain_entry.get("files", [])
+            if any(f in file_path for f in domain_files):
+                return domain_entry.get("name"), None
+
+    lower = file_path.lower()
+    domain = next((d for d, pat in _DOMAIN_PATTERNS.items() if pat.search(lower)), None)
+    role = next((r for r, pat in _ROLE_PATTERNS.items() if pat.search(lower)), None)
+    return domain, role
+
+
 async def pre_triage_node(state: AgentState) -> dict:
     """
     Classify changed files by observability relevance.
@@ -589,6 +621,13 @@ async def pre_triage_node(state: AgentState) -> dict:
         state, "triaging", 20, f"Found {relevant_count} relevant files.",
         stage_index=2, files_total=relevant_count,
     )
+
+    # Infer domain and file_role for each classified file using app_map + heuristics
+    app_map = (state.get("repo_context") or {}).get("app_map")
+    for f in classified:
+        domain, role = _infer_domain_and_role(f["path"], app_map)
+        f["domain"] = domain
+        f["file_role"] = role
 
     return {"changed_files": classified, "suppressed": suppressed}
 

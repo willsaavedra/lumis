@@ -26,7 +26,7 @@ class AnalysisJob(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"))
     repo_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("repositories.id", ondelete="CASCADE"))
     status: Mapped[str] = mapped_column(
-        Enum("pending", "running", "completed", "failed", name="job_status_enum"),
+        Enum("pending", "running", "completed", "failed", "awaiting_input", name="job_status_enum"),
         nullable=False, default="pending",
     )
     trigger: Mapped[str] = mapped_column(
@@ -60,6 +60,8 @@ class AnalysisJob(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     fix_pr_url: Mapped[str | None] = mapped_column(Text)
     fix_pr_enqueued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pending_questions: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    user_answers: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     repository: Mapped = relationship("Repository", back_populates="analysis_jobs")
