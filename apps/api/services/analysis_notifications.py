@@ -266,46 +266,57 @@ async def notify_fix_pr_created(*, job_id: str, pr_url: str) -> None:
     from apps.api.core.database import get_session_with_tenant
 
     async with get_session_with_tenant(tenant_id) as session:
-        team = await resolve_team_for_repo(session, tid, rid)
-        if not team:
-            log.debug("notify_fix_pr_no_team_for_repo", job_id=job_id, repo_id=repo_id)
-            return
-        if not team.notify_on_fix_pr:
-            return
-
-        slack_url = decrypt_scm_token(team.slack_webhook_encrypted)
-        teams_url = decrypt_scm_token(team.msteams_webhook_encrypted)
-        if not slack_url and not teams_url:
-            return
-
         repo_result = await session.execute(select(Repository).where(Repository.id == rid))
         repo = repo_result.scalar_one_or_none()
         repo_name = repo.full_name if repo else repo_id
 
-        team_id_str = str(team.id)
-        slack_body = build_slack_payload_fix_pr(
-            repo_full_name=repo_name,
-            job_id=job_id,
-            pr_url=pr_url,
-        )
-        teams_body = build_teams_message_card_fix_pr(
-            repo_full_name=repo_name,
-            job_id=job_id,
-            pr_url=pr_url,
-        )
+        team = await resolve_team_for_repo(session, tid, rid)
+        slack_url: str | None = None
+        teams_url: str | None = None
+        team_id_str = ""
+        slack_body = None
+        teams_body = None
+        if team and team.notify_on_fix_pr:
+            slack_url = decrypt_scm_token(team.slack_webhook_encrypted)
+            teams_url = decrypt_scm_token(team.msteams_webhook_encrypted)
+            team_id_str = str(team.id)
+            slack_body = build_slack_payload_fix_pr(
+                repo_full_name=repo_name,
+                job_id=job_id,
+                pr_url=pr_url,
+            )
+            teams_body = build_teams_message_card_fix_pr(
+                repo_full_name=repo_name,
+                job_id=job_id,
+                pr_url=pr_url,
+            )
 
-    if slack_url:
+    if slack_url and slack_body:
         try:
             await send_slack_incoming(slack_url, slack_body)
             log.info("notify_fix_pr_slack_sent", job_id=job_id, team_id=team_id_str)
         except Exception as e:
             log.warning("notify_fix_pr_slack_failed", job_id=job_id, error=str(e))
-    if teams_url:
+    if teams_url and teams_body:
         try:
             await send_teams_incoming(teams_url, teams_body)
             log.info("notify_fix_pr_teams_sent", job_id=job_id, team_id=team_id_str)
         except Exception as e:
             log.warning("notify_fix_pr_teams_failed", job_id=job_id, error=str(e))
+
+    # Per-repo email notifications for fix PRs
+    if repo and repo.notify_email_on_fix_pr and repo.notification_emails:
+        try:
+            from apps.api.services.email_service import send_fix_pr_email
+            await send_fix_pr_email(
+                repo.notification_emails,
+                repo_full_name=repo_name,
+                job_id=job_id,
+                pr_url=pr_url,
+            )
+            log.info("notify_fix_pr_email_sent", job_id=job_id, repo_id=repo_id)
+        except Exception as e:
+            log.warning("notify_fix_pr_email_failed", job_id=job_id, error=str(e))
 
 
 async def notify_analysis_completed(
@@ -337,18 +348,6 @@ async def notify_analysis_completed(
         if job.analysis_type == "context":
             return
 
-        team = await resolve_team_for_repo(session, tid, rid)
-        if not team:
-            log.debug("notify_no_team_for_repo", job_id=job_id, repo_id=repo_id)
-            return
-        if not team.notify_on_analysis_complete:
-            return
-
-        slack_url = decrypt_scm_token(team.slack_webhook_encrypted)
-        teams_url = decrypt_scm_token(team.msteams_webhook_encrypted)
-        if not slack_url and not teams_url:
-            return
-
         repo_result = await session.execute(select(Repository).where(Repository.id == rid))
         repo = repo_result.scalar_one_or_none()
         repo_name = repo.full_name if repo else repo_id
@@ -356,34 +355,64 @@ async def notify_analysis_completed(
         summ = _summarize_exec(exec_summary)
         branch_ref = job.branch_ref
 
-        team_id_str = str(team.id)
-        slack_body = build_slack_payload(
-            repo_full_name=repo_name,
-            branch_ref=branch_ref,
-            analysis_type=job.analysis_type,
-            job_id=job_id,
-            summary=summ,
-        )
-        teams_body = build_teams_message_card(
-            repo_full_name=repo_name,
-            branch_ref=branch_ref,
-            analysis_type=job.analysis_type,
-            job_id=job_id,
-            summary=summ,
-        )
+        team = await resolve_team_for_repo(session, tid, rid)
+        slack_url: str | None = None
+        teams_url: str | None = None
+        team_id_str = ""
+        slack_body = None
+        teams_body = None
+        if team and team.notify_on_analysis_complete:
+            slack_url = decrypt_scm_token(team.slack_webhook_encrypted)
+            teams_url = decrypt_scm_token(team.msteams_webhook_encrypted)
+            team_id_str = str(team.id)
+            slack_body = build_slack_payload(
+                repo_full_name=repo_name,
+                branch_ref=branch_ref,
+                analysis_type=job.analysis_type,
+                job_id=job_id,
+                summary=summ,
+            )
+            teams_body = build_teams_message_card(
+                repo_full_name=repo_name,
+                branch_ref=branch_ref,
+                analysis_type=job.analysis_type,
+                job_id=job_id,
+                summary=summ,
+            )
 
-    if slack_url:
+    if slack_url and slack_body:
         try:
             await send_slack_incoming(slack_url, slack_body)
             log.info("notify_slack_sent", job_id=job_id, team_id=team_id_str)
         except Exception as e:
             log.warning("notify_slack_failed", job_id=job_id, error=str(e))
-    if teams_url:
+    if teams_url and teams_body:
         try:
             await send_teams_incoming(teams_url, teams_body)
             log.info("notify_teams_sent", job_id=job_id, team_id=team_id_str)
         except Exception as e:
             log.warning("notify_teams_failed", job_id=job_id, error=str(e))
+
+    # Per-repo email notifications (uses data already resolved above)
+    if repo and repo.notify_email_on_complete and repo.notification_emails:
+        try:
+            from apps.api.services.email_service import send_analysis_complete_email
+            snippet = str(exec_summary.get("executive_summary") or exec_summary.get("summary") or "")
+            await send_analysis_complete_email(
+                repo.notification_emails,
+                repo_full_name=repo_name,
+                job_id=job_id,
+                branch_ref=branch_ref,
+                analysis_type=job.analysis_type,
+                score_global=summ.get("score_global"),
+                findings_critical=summ.get("findings_critical", 0),
+                findings_warning=summ.get("findings_warning", 0),
+                findings_total=summ.get("findings_total", 0),
+                exec_summary_snippet=snippet,
+            )
+            log.info("notify_email_sent", job_id=job_id, repo_id=repo_id)
+        except Exception as e:
+            log.warning("notify_email_failed", job_id=job_id, error=str(e))
 
 
 def encrypt_webhook_url(url: str | None) -> bytes | None:

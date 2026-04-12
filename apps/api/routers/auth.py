@@ -1,11 +1,12 @@
 """Authentication endpoints: signup, login, API key management."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlencode
 
 import httpx
@@ -104,6 +105,7 @@ class MeResponse(BaseModel):
     tenants: list[TenantSummary]
     needs_tenant_profile: bool
     needs_onboarding: bool = False
+    email_verified: bool = True
 
 
 class InvitePreviewResponse(BaseModel):
@@ -264,6 +266,7 @@ async def _find_or_create_google_user(session: AsyncSession, profile: dict) -> U
         password_hash=None,
         oauth_google_sub=sub,
         role="owner",
+        email_verified=True,  # Google already validated the email
     )
     session.add(user)
     await session.flush()
@@ -286,6 +289,10 @@ async def _find_or_create_google_user(session: AsyncSession, profile: dict) -> U
     await seed_default_tag_definitions(session, tenant.id)
 
     log.info("google_user_created", email=email_norm, user_id=str(user.id))
+
+    # Send welcome email immediately (Google accounts are pre-verified)
+    asyncio.ensure_future(_send_welcome_email_bg(email_norm))
+
     return user
 
 
@@ -323,12 +330,17 @@ async def signup(
         await session.flush()
 
         # 3. Create user
+        verify_token_plain = secrets.token_urlsafe(32)
+        verify_token_hash = hashlib.sha256(verify_token_plain.encode()).hexdigest()
         user = User(
             tenant_id=tenant.id,
             org_id=org.id,
             email=body.email,
             password_hash=hash_password(body.password),
             role="owner",
+            email_verified=False,
+            email_verify_token=verify_token_hash,
+            email_verify_expires_at=datetime.now(timezone.utc) + timedelta(hours=48),
         )
         session.add(user)
         await session.flush()
@@ -387,6 +399,11 @@ async def signup(
         await session.commit()
 
         log.info("tenant_created", tenant_id=str(tenant.id), email=body.email)
+
+        # Fire verification email async (non-blocking, don't fail signup if SES is down)
+        verify_url = f"{settings.frontend_url}/verify-email?token={verify_token_plain}"
+        asyncio.ensure_future(_send_verification_email_bg(body.email, verify_url))
+
         return SignupResponse(
             tenant_id=str(tenant.id),
             user_id=str(user.id),
@@ -397,6 +414,14 @@ async def signup(
         await session.rollback()
         log.error("signup_failed", error=str(e))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Signup failed.") from e
+
+
+async def _send_verification_email_bg(email: str, verify_url: str) -> None:
+    try:
+        from apps.api.services.email_service import send_verify_email
+        await send_verify_email(email, verify_url)
+    except Exception as exc:
+        log.warning("verify_email_send_failed", email=email, error=str(exc))
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -476,6 +501,7 @@ async def auth_me(
         tenants=summaries,
         needs_tenant_profile=needs_profile,
         needs_onboarding=needs_onboarding,
+        email_verified=user.email_verified,
     )
 
 
@@ -718,3 +744,131 @@ async def revoke_api_key(key_id: str, current: CurrentUser) -> None:
         if not key:
             raise HTTPException(status_code=404, detail="API key not found.")
         key.is_active = False
+
+
+# ── Email verification ────────────────────────────────────────────────────────
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+@router.post("/verify-email")
+async def verify_email(
+    body: VerifyEmailRequest,
+    session: AsyncSession = Depends(get_db_no_rls),
+) -> dict:
+    token_hash = hashlib.sha256(body.token.strip().encode()).hexdigest()
+    result = await session.execute(
+        select(User).where(User.email_verify_token == token_hash)
+    )
+    user = result.scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if not user or not user.email_verify_expires_at or user.email_verify_expires_at < now:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification link.")
+    if user.email_verified:
+        return {"status": "already_verified"}
+    user.email_verified = True
+    user.email_verify_token = None
+    user.email_verify_expires_at = None
+    await session.commit()
+    log.info("email_verified", user_id=str(user.id))
+
+    # Send welcome email
+    asyncio.ensure_future(_send_welcome_email_bg(user.email))
+    return {"status": "verified"}
+
+
+@router.post("/resend-verification", status_code=status.HTTP_202_ACCEPTED)
+async def resend_verification(
+    current: CurrentUser,
+    session: AsyncSession = Depends(get_db_no_rls),
+) -> dict:
+    user, _tid, _role = current
+    if user.email_verified:
+        return {"status": "already_verified"}
+    new_token_plain = secrets.token_urlsafe(32)
+    new_token_hash = hashlib.sha256(new_token_plain.encode()).hexdigest()
+    user.email_verify_token = new_token_hash
+    user.email_verify_expires_at = datetime.now(timezone.utc) + timedelta(hours=48)
+    await session.merge(user)
+    await session.commit()
+    verify_url = f"{settings.frontend_url}/verify-email?token={new_token_plain}"
+    asyncio.ensure_future(_send_verification_email_bg(user.email, verify_url))
+    return {"status": "sent"}
+
+
+async def _send_welcome_email_bg(email: str) -> None:
+    try:
+        from apps.api.services.email_service import send_welcome_email
+        await send_welcome_email(email)
+    except Exception as exc:
+        log.warning("welcome_email_send_failed", email=email, error=str(exc))
+
+
+# ── Password reset ────────────────────────────────────────────────────────────
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    password: str
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters.")
+        return v
+
+
+@router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    session: AsyncSession = Depends(get_db_no_rls),
+) -> dict:
+    """Always returns 202 to prevent user enumeration."""
+    result = await session.execute(select(User).where(User.email == body.email.lower().strip()))
+    user = result.scalar_one_or_none()
+    # Only proceed for manual (non-Google-only) accounts
+    if user and user.password_hash:
+        reset_token_plain = secrets.token_urlsafe(32)
+        reset_token_hash = hashlib.sha256(reset_token_plain.encode()).hexdigest()
+        user.password_reset_token = reset_token_hash
+        user.password_reset_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        await session.merge(user)
+        await session.commit()
+        reset_url = f"{settings.frontend_url}/reset-password?token={reset_token_plain}"
+        asyncio.ensure_future(_send_reset_email_bg(user.email, reset_url))
+    return {"detail": "If this address is registered, you'll receive a link shortly."}
+
+
+@router.post("/reset-password")
+async def reset_password(
+    body: ResetPasswordRequest,
+    session: AsyncSession = Depends(get_db_no_rls),
+) -> dict:
+    token_hash = hashlib.sha256(body.token.strip().encode()).hexdigest()
+    result = await session.execute(
+        select(User).where(User.password_reset_token == token_hash)
+    )
+    user = result.scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if not user or not user.password_reset_expires_at or user.password_reset_expires_at < now:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link.")
+    user.password_hash = hash_password(body.password)
+    user.password_reset_token = None
+    user.password_reset_expires_at = None
+    await session.merge(user)
+    await session.commit()
+    log.info("password_reset", user_id=str(user.id))
+    return {"status": "ok"}
+
+
+async def _send_reset_email_bg(email: str, reset_url: str) -> None:
+    try:
+        from apps.api.services.email_service import send_reset_password_email
+        await send_reset_password_email(email, reset_url)
+    except Exception as exc:
+        log.warning("reset_email_send_failed", email=email, error=str(exc))

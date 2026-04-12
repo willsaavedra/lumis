@@ -1,0 +1,54 @@
+<h2 style="margin:0 0 4px;font-size:20px;font-weight:600;letter-spacing:-0.025em;color:#0a0a0a;font-family:'JetBrains Mono',ui-monospace,monospace;">
+  Analysis complete
+</h2>
+<p style="margin:0 0 20px;font-size:12px;color:#888880;font-family:'JetBrains Mono',ui-monospace,monospace;">
+  $analysis_type &mdash; $repo_full_name
+</p>
+
+<!-- Stats row -->
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;width:100%;border:1px solid #e4e4de;border-radius:6px;overflow:hidden;">
+  <tr>
+    <td style="padding:14px 16px;border-bottom:1px solid #e4e4de;">
+      <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#888880;margin-bottom:3px;font-family:'JetBrains Mono',ui-monospace,monospace;">Repository</div>
+      <div style="font-size:13px;color:#0a0a0a;font-family:'JetBrains Mono',ui-monospace,monospace;">$repo_full_name</div>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:0;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+        <tr>
+          <td style="padding:14px 16px;border-right:1px solid #e4e4de;width:25%;">
+            <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#888880;margin-bottom:3px;font-family:'JetBrains Mono',ui-monospace,monospace;">Score</div>
+            <div style="font-size:18px;font-weight:700;letter-spacing:-0.04em;color:$grade_color;font-family:'JetBrains Mono',ui-monospace,monospace;">$score_global</div>
+            <div style="font-size:11px;color:$grade_color;font-family:'JetBrains Mono',ui-monospace,monospace;">grade $grade</div>
+          </td>
+          <td style="padding:14px 16px;border-right:1px solid #e4e4de;width:25%;">
+            <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#888880;margin-bottom:3px;font-family:'JetBrains Mono',ui-monospace,monospace;">Critical</div>
+            <div style="font-size:18px;font-weight:700;letter-spacing:-0.04em;color:#c0392b;font-family:'JetBrains Mono',ui-monospace,monospace;">$findings_critical</div>
+          </td>
+          <td style="padding:14px 16px;border-right:1px solid #e4e4de;width:25%;">
+            <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#888880;margin-bottom:3px;font-family:'JetBrains Mono',ui-monospace,monospace;">Warning</div>
+            <div style="font-size:18px;font-weight:700;letter-spacing:-0.04em;color:#b7791f;font-family:'JetBrains Mono',ui-monospace,monospace;">$findings_warning</div>
+          </td>
+          <td style="padding:14px 16px;width:25%;">
+            <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#888880;margin-bottom:3px;font-family:'JetBrains Mono',ui-monospace,monospace;">Branch</div>
+            <div style="font-size:12px;color:#0a0a0a;font-family:'JetBrains Mono',ui-monospace,monospace;">$branch_ref</div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- Summary snippet -->
+<div style="padding:14px 16px;background-color:#f8f8f6;border:1px solid #e4e4de;border-radius:6px;margin-bottom:24px;">
+  <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#888880;margin-bottom:6px;font-family:'JetBrains Mono',ui-monospace,monospace;">Summary</div>
+  <div style="font-size:12px;color:#3a3a3a;line-height:1.7;font-family:'JetBrains Mono',ui-monospace,monospace;">$exec_summary_snippet</div>
+</div>
+
+<div>
+  <a href="$report_url"
+     style="display:inline-block;padding:10px 20px;background-color:#0a0a0a;color:#ffffff;font-size:13px;font-weight:600;letter-spacing:-0.01em;text-decoration:none;border-radius:8px;font-family:'JetBrains Mono',ui-monospace,monospace;">
+    View full report &rarr;
+  </a>
+</div>

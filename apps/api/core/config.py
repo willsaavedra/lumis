@@ -112,6 +112,13 @@ class Settings(BaseSettings):
     # Slack — optional global URL for internal/ops use only; per-team webhooks live in `teams.slack_webhook_encrypted` (Settings).
     slack_webhook_url: str = ""
 
+    # AWS SES — transactional email
+    aws_ses_region: str = "us-east-1"
+    aws_ses_access_key_id: str = ""
+    aws_ses_secret_access_key: str = ""
+    aws_ses_from_address: str = "no-reply@horion.pro"
+    aws_ses_from_name: str = "Horion"
+
     # Plan credit limits
     plan_credits: dict[str, int] = {
         "free": 50,

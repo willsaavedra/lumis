@@ -67,6 +67,10 @@ class Repository(Base):
     app_map: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Tracks when context_summary was last refreshed; used to auto-enqueue context refresh jobs
     context_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Email notifications per repository
+    notification_emails: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default="{}", default=list)
+    notify_email_on_complete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    notify_email_on_fix_pr: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     connection: Mapped[ScmConnection | None] = relationship()

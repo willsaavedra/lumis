@@ -83,6 +83,13 @@ class User(Base):
         default="member",
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Email verification
+    email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    email_verify_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    email_verify_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Password reset
+    password_reset_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    password_reset_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

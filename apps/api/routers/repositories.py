@@ -655,3 +655,67 @@ async def _get_last_analysis_at(session, tenant_id: str, repo_id) -> object | No
         )
     )
     return result.scalar_one_or_none()
+
+
+# ── Email notifications per repository ───────────────────────────────────────
+
+class RepoNotificationsRequest(BaseModel):
+    notification_emails: list[str] = Field(default_factory=list)
+    notify_email_on_complete: bool = False
+    notify_email_on_fix_pr: bool = False
+
+
+class RepoNotificationsResponse(BaseModel):
+    notification_emails: list[str]
+    notify_email_on_complete: bool
+    notify_email_on_fix_pr: bool
+
+
+@router.get("/{repo_id}/notifications", response_model=RepoNotificationsResponse)
+async def get_repo_notifications(repo_id: str, current: TenantAdmin) -> RepoNotificationsResponse:
+    _user, tenant_id, _ = current
+    async with get_session_with_tenant(tenant_id) as session:
+        result = await session.execute(
+            select(Repository).where(
+                Repository.id == uuid.UUID(repo_id),
+                Repository.tenant_id == uuid.UUID(tenant_id),
+            )
+        )
+        repo = result.scalar_one_or_none()
+        if not repo:
+            raise HTTPException(status_code=404, detail="Repository not found.")
+    return RepoNotificationsResponse(
+        notification_emails=repo.notification_emails or [],
+        notify_email_on_complete=repo.notify_email_on_complete,
+        notify_email_on_fix_pr=repo.notify_email_on_fix_pr,
+    )
+
+
+@router.patch("/{repo_id}/notifications", response_model=RepoNotificationsResponse)
+async def update_repo_notifications(
+    repo_id: str,
+    body: RepoNotificationsRequest,
+    current: TenantAdmin,
+) -> RepoNotificationsResponse:
+    _user, tenant_id, _ = current
+    async with get_session_with_tenant(tenant_id) as session:
+        result = await session.execute(
+            select(Repository).where(
+                Repository.id == uuid.UUID(repo_id),
+                Repository.tenant_id == uuid.UUID(tenant_id),
+            )
+        )
+        repo = result.scalar_one_or_none()
+        if not repo:
+            raise HTTPException(status_code=404, detail="Repository not found.")
+        # Normalise and deduplicate emails
+        emails = list({e.strip().lower() for e in body.notification_emails if e.strip()})
+        repo.notification_emails = emails
+        repo.notify_email_on_complete = body.notify_email_on_complete
+        repo.notify_email_on_fix_pr = body.notify_email_on_fix_pr
+    log.info("repo_notifications_updated", repo_id=repo_id, email_count=len(emails))
+    return RepoNotificationsResponse(
+        notification_emails=emails,
+        notify_email_on_complete=body.notify_email_on_complete,
+        notify_email_on_fix_pr=body.notify_email_on_fix_pr,
+    )
